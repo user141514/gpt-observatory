@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { createDatabase } from './db.js'
 import { createSemanticIndex } from './semantic.js'
 import { createStore } from './store.js'
+import { createWatchdogBridge } from './watchdog.js'
 
 const app = express()
 app.use(express.json({ limit: '2mb' }))
@@ -10,6 +11,7 @@ app.use(express.json({ limit: '2mb' }))
 const db = await createDatabase()
 const store = createStore(db)
 const semantic = createSemanticIndex(db, store)
+const watchdog = createWatchdogBridge(store)
 
 const sourceSchema = z.object({
   key: z.string().min(1),
@@ -63,6 +65,18 @@ app.get('/api/graph', async (_req, res) => {
   res.json(await store.graph())
 })
 
+app.get('/api/supervised-tasks', async (_req, res) => {
+  res.json(watchdog.current())
+})
+
+app.post('/api/watchdog/sync', async (_req, res, next) => {
+  try {
+    res.json(await watchdog.sync())
+  } catch (error) {
+    next(error)
+  }
+})
+
 app.get('/api/search', async (req, res, next) => {
   try {
     const query = z.string().min(1).parse(req.query.q)
@@ -113,11 +127,24 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
 })
 
 const port = Number(process.env.OBSERVATORY_PORT ?? 4317)
+const watchdogSyncSeconds = Math.max(
+  15,
+  Number(process.env.WATCHDOG_SYNC_SECONDS ?? 60),
+)
+
 const server = app.listen(port, '127.0.0.1', () => {
   console.log(`GPT Observatory API listening on http://127.0.0.1:${port}`)
 })
 
+void watchdog.sync()
+
+const watchdogTimer = setInterval(() => {
+  void watchdog.sync()
+}, watchdogSyncSeconds * 1000)
+watchdogTimer.unref()
+
 async function shutdown() {
+  clearInterval(watchdogTimer)
   server.close()
   await db.close()
 }

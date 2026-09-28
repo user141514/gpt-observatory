@@ -2,29 +2,38 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import cytoscape, { type Core } from 'cytoscape'
 import { api } from './api'
-import type { GraphResponse, NowResponse, SearchResult, TimelineEvent } from './types'
+import type {
+  GraphResponse,
+  NowResponse,
+  SearchResult,
+  SupervisedTask,
+  SupervisedTasksResponse,
+  TimelineEvent,
+} from './types'
 import './App.css'
 
-type Tab = 'now' | 'timeline' | 'graph' | 'search'
+type Tab = 'tasks' | 'now' | 'timeline' | 'graph' | 'search'
 type GraphNode = GraphResponse['nodes'][number]
 
 const tabs: Array<{ id: Tab; zh: string; en: string }> = [
-  { id: 'now', zh: '当前状态', en: 'NOW' },
+  { id: 'tasks', zh: '监督任务', en: 'SUPERVISED TASKS' },
+  { id: 'now', zh: '事实视图', en: 'CURRENT FACTS' },
   { id: 'timeline', zh: '时间线', en: 'TIMELINE' },
   { id: 'graph', zh: '知识图谱', en: 'KNOWLEDGE GRAPH' },
   { id: 'search', zh: '语义检索', en: 'SEMANTIC SEARCH' },
 ]
 
-const metricLabels: Array<{ key: string; zh: string; en: string; detail: string }> = [
-  { key: 'entities', zh: '实体', en: 'Entities', detail: '被观测对象' },
-  { key: 'observations', zh: '观测', en: 'Observations', detail: '事实证据点' },
-  { key: 'facts', zh: '事实', en: 'Facts', detail: '时态状态区间' },
-  { key: 'relations', zh: '关系', en: 'Relations', detail: '事实关系边' },
-  { key: 'semantic', zh: '语义索引', en: 'Semantic', detail: '向量检索记录' },
-]
-
 export default function App() {
-  const [tab, setTab] = useState<Tab>('now')
+  const [tab, setTab] = useState<Tab>('tasks')
+  const [supervised, setSupervised] = useState<SupervisedTasksResponse>({
+    integration: {
+      available: false,
+      ready: false,
+      watchdogUrl: 'http://127.0.0.1:9235',
+      relayUrl: 'http://127.0.0.1:9224',
+    },
+    tasks: [],
+  })
   const [now, setNow] = useState<NowResponse>({ counts: {}, entities: [] })
   const [timeline, setTimeline] = useState<TimelineEvent[]>([])
   const [graph, setGraph] = useState<GraphResponse>({ nodes: [], edges: [] })
@@ -36,7 +45,9 @@ export default function App() {
   async function refresh() {
     setRefreshing(true)
     try {
+      const supervisedTasks = await api.syncWatchdog()
       const [n, t, g] = await Promise.all([api.now(), api.timeline(), api.graph()])
+      setSupervised(supervisedTasks)
       setNow(n)
       setTimeline(t.events)
       setGraph(g)
@@ -111,15 +122,25 @@ export default function App() {
         </header>
 
         <section className="metrics" aria-label="Observatory metrics">
-          {metricLabels.map(metric => (
-            <Metric
-              key={metric.key}
-              zh={metric.zh}
-              en={metric.en}
-              value={now.counts[metric.key] ?? 0}
-              detail={metric.detail}
-            />
-          ))}
+          <Metric zh="监督任务" en="Supervised" value={supervised.tasks.length} detail="Watchdog 管理对象" />
+          <Metric
+            zh="运行正常"
+            en="Operational"
+            value={supervised.integration.ready
+              ? supervised.tasks.filter(task => task.operational).length
+              : 0}
+            detail="最近监督成功"
+          />
+          <Metric
+            zh="异常"
+            en="Degraded"
+            value={supervised.integration.ready
+              ? supervised.tasks.filter(task => !task.operational).length
+              : 0}
+            detail="需要检查的监督状态"
+          />
+          <Metric zh="当前对话" en="Conversations" value={supervised.tasks.length} detail="任务执行绑定" />
+          <Metric zh="事实" en="Facts" value={now.counts.facts ?? 0} detail="时态状态区间" />
         </section>
 
         <nav className="view-nav" aria-label="Observatory views">
@@ -144,6 +165,7 @@ export default function App() {
         )}
 
         <section className="workspace-panel">
+          {tab === 'tasks' && <SupervisedTasks data={supervised} />}
           {tab === 'now' && <Now data={now} />}
           {tab === 'timeline' && <Timeline events={timeline} />}
           {tab === 'graph' && <GraphWorkbench data={graph} />}
@@ -167,6 +189,175 @@ function Metric({ zh, en, value, detail }: { zh: string; en: string; value: numb
       <p>{detail}</p>
     </article>
   )
+}
+
+function SupervisedTasks({ data }: { data: SupervisedTasksResponse }) {
+  const healthy = data.integration.ready
+    ? data.tasks.filter(task => task.operational).length
+    : 0
+  const attention = data.integration.ready
+    ? data.tasks.length - healthy
+    : 0
+
+  return (
+    <section className="supervised-section">
+      <SectionHeading
+        kickerZh="Watchdog 权威监督集合"
+        kickerEn="WATCHDOG AUTHORITATIVE SET"
+        titleZh="正在监督的任务"
+        titleEn="Supervised Tasks"
+        meta={data.integration.ready
+          ? `${data.tasks.length} 个任务 · ${healthy} 正常 · ${attention} 需关注`
+          : data.integration.available
+            ? `${data.tasks.length} 个任务 · Watchdog reachable but not ready`
+            : 'Watchdog integration unavailable'}
+      />
+
+      <div className={data.integration.ready ? 'integration-banner online' : 'integration-banner degraded'}>
+        <div>
+          <span className="integration-dot" />
+          <div>
+            <strong>
+              {data.integration.ready
+                ? 'Watchdog 联动正常'
+                : data.integration.available
+                  ? 'Watchdog 可访问，但监督未就绪'
+                  : 'Watchdog 联动不可用'}
+            </strong>
+            <small>
+              {data.integration.available
+                ? `最近同步 ${data.integration.lastSyncAt ? dateTime(data.integration.lastSyncAt) : '—'}`
+                : data.integration.error ?? 'No successful Watchdog snapshot yet.'}
+            </small>
+          </div>
+        </div>
+        <code>{data.integration.watchdogUrl}</code>
+      </div>
+
+      {data.tasks.length ? (
+        <div className="supervised-task-grid">
+          {data.tasks.map(task => (
+            <SupervisedTaskCard
+              task={task}
+              integrationAvailable={data.integration.ready}
+              key={task.taskId}
+            />
+          ))}
+        </div>
+      ) : (
+        <Empty
+          zh={data.integration.available ? '当前没有被监督的任务' : '尚未取得监督任务快照'}
+          en={data.integration.available
+            ? 'No Watchdog-registered tasks are active.'
+            : 'Waiting for a successful Watchdog snapshot.'}
+        />
+      )}
+    </section>
+  )
+}
+
+function SupervisedTaskCard({
+  task,
+  integrationAvailable,
+}: {
+  task: SupervisedTask
+  integrationAvailable: boolean
+}) {
+  const status = taskStatus(task, integrationAvailable)
+  return (
+    <article className="supervised-task-card">
+      <div className="task-card-head">
+        <div>
+          <span className={`task-status ${status.tone}`}>
+            <i />
+            {status.zh}
+            <small>{status.en}</small>
+          </span>
+          <h3>{task.label}</h3>
+        </div>
+        <span className="task-identity">
+          {task.identitySource === 'watchdog_task_id' ? 'TASK ID' : 'LEGACY ID'}
+        </span>
+      </div>
+
+      <div className="task-primary-state">
+        <div>
+          <span>Watchdog 状态</span>
+          <small>SUPERVISION STATE</small>
+        </div>
+        <strong>{task.watchdogState}</strong>
+      </div>
+
+      <div className="binding-stack">
+        <div className="binding-row conversation-binding">
+          <div className="binding-icon">C</div>
+          <div className="binding-main">
+            <span>当前对话 <small>CURRENT CONVERSATION</small></span>
+            <strong>{task.currentConversation.id}</strong>
+            <a href={task.currentConversation.url} target="_blank" rel="noreferrer">
+              打开对话 / Open conversation
+            </a>
+          </div>
+        </div>
+
+        <div className={
+          task.runtimeTabState === 'present'
+            ? 'binding-row tab-binding'
+            : task.runtimeTabState === 'absent'
+              ? 'binding-row tab-binding muted'
+              : 'binding-row tab-binding unknown'
+        }>
+          <div className="binding-icon">T</div>
+          <div className="binding-main">
+            <span>运行时标签页 <small>RUNTIME TAB</small></span>
+            <strong>
+              {task.runtimeTabState === 'present'
+                ? task.runtimeTab?.title
+                : task.runtimeTabState === 'absent'
+                  ? '未绑定 / Not currently rendered'
+                  : '未知 / Relay observation unavailable'}
+            </strong>
+            <code>{task.runtimeTabState === 'present' ? task.runtimeTab?.id : '—'}</code>
+          </div>
+        </div>
+      </div>
+
+      <dl className="task-diagnostics">
+        <div>
+          <dt>最近成功 / Last success</dt>
+          <dd>{task.lastSuccessAt ? dateTime(task.lastSuccessAt) : '—'}</dd>
+        </div>
+        <div>
+          <dt>最近轮询 / Last poll</dt>
+          <dd>{task.lastPollAt ? dateTime(task.lastPollAt) : '—'}</dd>
+        </div>
+        <div>
+          <dt>连续失败 / Failures</dt>
+          <dd>{task.consecutiveFailures}</dd>
+        </div>
+      </dl>
+
+      {task.lastError && (
+        <div className="task-error">
+          <span>监督异常 / Supervision error</span>
+          <code>{task.lastError}</code>
+        </div>
+      )}
+    </article>
+  )
+}
+
+function taskStatus(task: SupervisedTask, integrationAvailable: boolean) {
+  if (!integrationAvailable) {
+    return { zh: '状态未知', en: 'UNVERIFIED', tone: 'unknown' }
+  }
+  if (task.watchdogState === 'need_input') {
+    return { zh: '等待输入', en: 'NEED INPUT', tone: 'waiting' }
+  }
+  if (task.operational) {
+    return { zh: '监督正常', en: 'OPERATIONAL', tone: 'healthy' }
+  }
+  return { zh: '监督异常', en: 'DEGRADED', tone: 'degraded' }
 }
 
 function Now({ data }: { data: NowResponse }) {

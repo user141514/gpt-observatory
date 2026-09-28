@@ -31,6 +31,29 @@ A projection may lag or be deleted without changing factual truth. The canonical
 
 Counterexample: two successful polls report `status=running`. This is two observations but one open fact interval. If the second poll creates another fact, TIMELINE fabricates a transition that did not happen.
 
+## Supervision identity contract
+
+For Watchdog-supervised work, identity is ordered:
+
+```text
+Task
+  ↓ current execution binding
+Conversation
+  ↓ transient runtime rendering
+Tab
+```
+
+- **Task is the stable business identity.** It survives conversation replacement.
+- **Conversation is the current execution binding.** A task may move to a replacement conversation without becoming a new task.
+- **Tab is runtime-only.** Refreshing, reopening, replacing, or losing a browser tab must not create a new task or durable factual entity.
+- **Watchdog Registry owns the supervised-task allowlist and current task→conversation binding.**
+- **Observatory owns temporal factual history and projections.** It must not invent supervision membership or become a second task-lifecycle authority.
+- Browser Relay may be queried only to resolve the current tab for a conversation already present in the Watchdog supervised set. Unregistered ChatGPT tabs remain invisible to supervision ingestion.
+
+Core invariant:
+
+> Task identity survives conversation replacement; conversation identity survives tab replacement.
+
 ## V1 ontology
 
 ### Source
@@ -63,8 +86,8 @@ A canonical textual serialization of factual state or a factual change, with a l
 | R4 vector retrieval | local embedding + SurrealDB HNSW returns semantic neighbours | passed: local MiniLM query returned task/repo neighbours |
 | R5 human visual acceptance | NOW / TIMELINE / GRAPH / SEARCH use live API data | ready for human acceptance at local Vite UI on port 4318 |
 | R6 Obsidian projection | generated Markdown + .base files contain wikilinks/frontmatter | passed: API-backed export generated vault successfully |
-| R7 GPT conversation ingestion | exact conversation identity + observer adapters | blocked by current Watchdog/self-identity runtime |
-| R8 Watchdog supervision | exact-current-conversation mount survives a poll cycle | blocked until exact /c/<uuid> identity and runtime are available |
+| R7 GPT conversation ingestion | Watchdog registered Task → current Conversation projection; Relay only resolves runtime Tab for registered conversations | passed in source tests; live task-first Watchdog deployment pending |
+| R8 Watchdog supervision | task-first registry survives process restart and a real poll cycle with fresh success | source contract passed; live runtime deployment/poll still pending |
 
 ## Acceptance scenarios
 

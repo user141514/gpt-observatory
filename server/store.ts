@@ -35,6 +35,14 @@ export interface RelationInput {
   rawPayload?: unknown
 }
 
+export interface ClearRelationInput {
+  source: SourceInput
+  from: EntityInput
+  predicate: string
+  observedAt?: string
+  rawPayload?: unknown
+}
+
 export interface ObserveResult {
   observationId: string
   entityId: string
@@ -286,6 +294,63 @@ export function createStore(db: ObservatoryDb) {
     return { observationId: idString(observationId), relationChanged: true }
   }
 
+  async function clearRelation(input: ClearRelationInput): Promise<{
+    observationId: string
+    relationsClosed: number
+  }> {
+    const sourceId = await ensureSource(input.source)
+    const fromId = await ensureEntity(input.from)
+    const observedAt = input.observedAt ? new Date(input.observedAt) : new Date()
+    const observationId = new RecordId('observation', randomUUID())
+
+    await db.query(
+      `CREATE $id SET
+        source = $source,
+        entity = $entity,
+        observed_at = $observed_at,
+        recorded_at = time::now(),
+        coverage = [$coverage],
+        snapshot_hash = $snapshot_hash,
+        raw_payload = $raw_payload,
+        status = "ok"`,
+      {
+        id: observationId,
+        source: sourceId,
+        entity: fromId,
+        observed_at: observedAt,
+        coverage: `relation:${input.predicate}`,
+        snapshot_hash: hashCanonical({ predicate: input.predicate, cleared: true }),
+        raw_payload: input.rawPayload ?? {
+          predicate: input.predicate,
+          from: input.from.stableKey,
+          cleared: true,
+        },
+      },
+    )
+
+    const current = rows(
+      await db.query(
+        `SELECT * FROM relation
+         WHERE in = $from
+           AND predicate = $predicate
+           AND valid_to IS NONE`,
+        { from: fromId, predicate: input.predicate },
+      ),
+    )
+
+    for (const relation of current) {
+      await db.query('UPDATE $id SET valid_to = $valid_to', {
+        id: relation.id,
+        valid_to: observedAt,
+      })
+    }
+
+    return {
+      observationId: idString(observationId),
+      relationsClosed: current.length,
+    }
+  }
+
   async function currentEntities(): Promise<CurrentEntity[]> {
     const entityRows = rows(await db.query('SELECT * FROM entity ORDER BY type, label'))
     const factRows = rows(
@@ -456,6 +521,7 @@ export function createStore(db: ObservatoryDb) {
     ensureEntity,
     observe,
     setRelation,
+    clearRelation,
     currentEntities,
     timeline,
     graph,

@@ -45,6 +45,53 @@ export interface GraphResponse {
   }>
 }
 
+export interface SupervisedTask {
+  taskId: string
+  stableKey: string
+  label: string
+  identitySource: 'watchdog_task_id' | 'legacy_conversation_id'
+  watchdogState: string
+  registered: boolean
+  connected: boolean
+  operational: boolean
+  currentConversation: {
+    id: string
+    url: string
+    stableKey: string
+  }
+  runtimeTabState: 'present' | 'absent' | 'unknown'
+  runtimeTab?: {
+    id: string
+    title?: string
+    url?: string
+  }
+  registeredAt?: string
+  bindingChangedAt?: string
+  lastPollAt?: string
+  lastSuccessAt?: string
+  consecutiveFailures: number
+  lastError?: string
+}
+
+export interface SupervisedTasksResponse {
+  integration: {
+    available: boolean
+    ready: boolean
+    watchdogUrl: string
+    relayUrl: string
+    lastSyncAt?: string
+    error?: string
+    health?: {
+      ready?: boolean
+      polling_fresh?: boolean
+      active_count?: number
+      degraded_count?: number
+      last_poll_error?: string | null
+    }
+  }
+  tasks: SupervisedTask[]
+}
+
 export interface SearchResult {
   id: string
   targetType: string

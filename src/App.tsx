@@ -124,12 +124,12 @@ export default function App() {
         <section className="metrics" aria-label="Observatory metrics">
           <Metric zh="监督任务" en="Supervised" value={supervised.tasks.length} detail="Watchdog 管理对象" />
           <Metric
-            zh="运行正常"
+            zh="监督可用"
             en="Operational"
             value={supervised.integration.ready
               ? supervised.tasks.filter(task => task.operational).length
               : 0}
-            detail="最近监督成功"
+            detail="Watchdog 最近成功执行"
           />
           <Metric
             zh="异常"
@@ -351,8 +351,22 @@ function taskStatus(task: SupervisedTask, integrationAvailable: boolean) {
   if (!integrationAvailable) {
     return { zh: '状态未知', en: 'UNVERIFIED', tone: 'unknown' }
   }
-  if (task.watchdogState === 'need_input') {
+
+  const state = task.watchdogState
+  if (state === 'need_input') {
     return { zh: '等待输入', en: 'NEED INPUT', tone: 'waiting' }
+  }
+  if (state === 'submission_unknown') {
+    return { zh: '发送待确认', en: 'DELIVERY UNCERTAIN', tone: 'waiting' }
+  }
+  if (state === 'sent_no_visible_progress') {
+    return { zh: '等待进展', en: 'WAITING PROGRESS', tone: 'waiting' }
+  }
+  if (state === 'send_rejected' || state === 'target_changed' || state === 'degraded') {
+    return { zh: '监督异常', en: 'DEGRADED', tone: 'degraded' }
+  }
+  if (state === 'done') {
+    return { zh: '任务完成', en: 'DONE', tone: 'healthy' }
   }
   if (task.operational) {
     return { zh: '监督正常', en: 'OPERATIONAL', tone: 'healthy' }

@@ -352,7 +352,9 @@ export function createStore(db: ObservatoryDb) {
   }
 
   async function currentEntities(): Promise<CurrentEntity[]> {
-    const entityRows = rows(await db.query('SELECT * FROM entity ORDER BY type, label'))
+    const entityRows = rows(
+      await db.query('SELECT * FROM entity WHERE type != "browser_tab" ORDER BY type, label'),
+    )
     const factRows = rows(
       await db.query(
         'SELECT * FROM fact WHERE valid_to IS NONE ORDER BY entity, attribute',
@@ -415,6 +417,7 @@ export function createStore(db: ObservatoryDb) {
         const fact = group[i]
         const previous = i > 0 ? group[i - 1] : undefined
         const entity = entities.get(idString(fact.entity))
+        if (entity?.type === 'browser_tab') continue
         events.push({
           id: idString(fact.id),
           entityId: idString(fact.entity),
@@ -443,6 +446,7 @@ export function createStore(db: ObservatoryDb) {
         'SELECT * FROM relation WHERE valid_to IS NONE ORDER BY valid_from DESC',
       ),
     )
+    const visibleNodeIds = new Set(entities.map(entity => entity.id))
 
     return {
       nodes: entities.map((entity) => ({
@@ -453,14 +457,20 @@ export function createStore(db: ObservatoryDb) {
         facts: entity.currentFacts,
         lastObservedAt: entity.lastObservedAt,
       })),
-      edges: relationRows.map((relation) => ({
-        id: idString(relation.id),
-        source: idString(relation.in),
-        target: idString(relation.out),
-        predicate: relation.predicate,
-        validFrom: iso(relation.valid_from),
-        observationId: idString(relation.observation),
-      })),
+      edges: relationRows
+        .filter(
+          relation =>
+            visibleNodeIds.has(idString(relation.in))
+            && visibleNodeIds.has(idString(relation.out)),
+        )
+        .map((relation) => ({
+          id: idString(relation.id),
+          source: idString(relation.in),
+          target: idString(relation.out),
+          predicate: relation.predicate,
+          validFrom: iso(relation.valid_from),
+          observationId: idString(relation.observation),
+        })),
     }
   }
 

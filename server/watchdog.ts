@@ -184,7 +184,36 @@ export function createWatchdogBridge(
       )
 
       const seenTaskKeys = new Set<string>()
+      const activeConversationIds = new Set(
+        watches.map(watch => watch.conversation_id),
+      )
       const views: SupervisedTaskView[] = []
+
+      const existingGraph = await store.graph()
+      const legacyRenderedConversationIds = new Set(
+        existingGraph.edges
+          .filter(edge => edge.predicate === 'RENDERED_IN')
+          .map(edge => {
+            const node = existingGraph.nodes.find(item => item.id === edge.source)
+            const stableKey =
+              typeof node?.stableKey === 'string' ? node.stableKey : undefined
+            return stableKey?.startsWith('conversation:')
+              ? stableKey.slice('conversation:'.length)
+              : undefined
+          })
+          .filter((value): value is string => Boolean(value)),
+      )
+      for (const conversationId of legacyRenderedConversationIds) {
+        await store.clearRelation({
+          source: WATCHDOG_SOURCE,
+          from: conversationEntityFor(conversationId),
+          predicate: 'RENDERED_IN',
+          observedAt,
+          rawPayload: {
+            reason: 'legacy durable browser-tab relation retired; tabs are runtime-only',
+          },
+        })
+      }
 
       for (const watch of watches) {
         const taskId = watch.task_id?.trim() || watch.conversation_id
@@ -350,7 +379,10 @@ export function createWatchdogBridge(
           entity.currentFacts.current_conversation_id,
         )
 
-        if (priorConversationId) {
+        if (
+          priorConversationId
+          && !activeConversationIds.has(priorConversationId)
+        ) {
           await markConversationUnbound(
             store,
             priorConversationId,

@@ -44,6 +44,30 @@ test('watchdog bridge preserves canonical task identity and keeps tabs runtime-o
         label: `Conversation ${CHAT_A.slice(0, 8)}`,
       },
     })
+    await store.observe({
+      source: migrationSource,
+      entity: {
+        stableKey: 'browser-tab:PAGE_LEGACY',
+        type: 'browser_tab',
+        label: 'Legacy browser tab',
+      },
+      coverage: ['relay_page_id'],
+      facts: { relay_page_id: 'PAGE_LEGACY' },
+    })
+    await store.setRelation({
+      source: migrationSource,
+      from: {
+        stableKey: `conversation:${CHAT_A}`,
+        type: 'conversation',
+        label: `Conversation ${CHAT_A.slice(0, 8)}`,
+      },
+      predicate: 'RENDERED_IN',
+      to: {
+        stableKey: 'browser-tab:PAGE_LEGACY',
+        type: 'browser_tab',
+        label: 'Legacy browser tab',
+      },
+    })
 
     let health: WatchdogHealth = {
       ready: true,
@@ -113,6 +137,15 @@ test('watchdog bridge preserves canonical task identity and keeps tabs runtime-o
     const canonicalTask = entities.find(entity => entity.stableKey === 'task:task-alpha')
     assert.equal(canonicalTask?.type, 'task')
     assert.equal(canonicalTask?.currentFacts.watchdog_registered, true)
+
+    const currentConversationA = entities.find(
+      entity => entity.stableKey === `conversation:${CHAT_A}`,
+    )
+    assert.equal(
+      currentConversationA?.currentFacts.watchdog_bound,
+      true,
+      'retiring the legacy task must not unbind the conversation still used by the canonical task',
+    )
 
     const legacyTask = entities.find(
       entity => entity.stableKey === 'supervised-task:task-alpha',

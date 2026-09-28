@@ -4,23 +4,70 @@ GPT Observatory is a local factual state system for understanding what GPT/agent
 
 The canonical store is embedded SurrealDB. Observations are append-only evidence; current facts and relations are time-bounded state derived from those observations. Semantic embeddings and Obsidian files are rebuildable projections, not alternate truth sources.
 
-## V1 views
+## Product views
 
-- **NOW** — current factual state for observed entities.
+- **SUPERVISED TASKS** — Watchdog-owned task supervision and current conversation bindings.
+- **FACT EXPLORER** — current factual state grouped by meaning, with source authority plus observation / recorded / valid-from evidence details.
 - **TIMELINE** — actual fact-version transitions.
-- **GRAPH** — current factual relations.
-- **SEARCH** — local semantic retrieval over factual state.
+- **KNOWLEDGE GRAPH** — current factual relations.
+- **SEMANTIC SEARCH** — local semantic retrieval over factual state.
 - **Obsidian projection** — generated entity notes, wikilinks, dashboard, and Base definition.
 
-## Run locally
+## Install the local app
+
+Development still supports the split Vite/API workflow, but normal use is packaged as one local process: the Node API serves the built frontend from the same `127.0.0.1:4317` origin.
 
 ```bash
 npm install
-npm run start:server
-npm run dev:web -- --host 127.0.0.1 --port 4318
+npm run app:install
 ```
 
-The API defaults to `http://127.0.0.1:4317` and the Vite development UI to `http://127.0.0.1:4318`.
+On Windows this creates an independent local installation:
+
+```text
+%LOCALAPPDATA%\GPTObservatory\
+├─ app\current\        compiled UI + server + production dependencies
+├─ data\observatory     canonical RocksDB (survives app upgrades)
+├─ launcher\            stable start / stop entrypoints
+├─ runtime\             PID and logs
+└─ GPT Observatory.ico
+```
+
+It also creates:
+
+- **GPT Observatory** on the Desktop and in the Start Menu.
+- A standalone Edge app window when Microsoft Edge is available, with browser fallback otherwise.
+- `gpt-observatory-app` and `gpt-observatory-stop` in the user `bin` directory.
+- `gpt-observatory` and `gpt-observatory-mcp` backed by the installed compiled JS, not the Git checkout.
+- The user `bin` directory on the Windows User PATH when needed.
+
+The installed app does not depend on the source checkout or its `node_modules`. Development and installed runtimes both use the same stable user-data home, so there is only one default canonical RocksDB.
+
+After installation:
+
+```bash
+npm start
+# or
+gpt-observatory-app
+```
+
+If Observatory is already running, the launcher only opens the UI and does not start a duplicate server.
+
+Stop it with:
+
+```bash
+npm stop
+# or
+gpt-observatory-stop
+```
+
+The production UI and API both use `http://127.0.0.1:4317`. The production server returns a signed health response (`service=gpt-observatory`) so launchers do not mistake an unrelated service on the same port for Observatory.
+
+For frontend development:
+
+```bash
+npm run dev
+```
 
 ## Agent access
 
@@ -53,6 +100,7 @@ Both adapters call the canonical HTTP API; neither opens RocksDB as another owne
 npm run lint
 npm test
 npm run build
+npm run app:icon
 npm run export:obsidian
 npm run agent -- context --recent 5
 ```

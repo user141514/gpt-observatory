@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { chmod, mkdir, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -8,10 +9,24 @@ const home = homedir()
 const binDir = join(home, 'bin')
 const skillDir = join(home, '.agents', 'skills', 'gpt-observatory')
 const node = process.execPath
+
+const localAppData = process.env.LOCALAPPDATA ?? join(home, 'AppData', 'Local')
+const installedApp = join(localAppData, 'GPTObservatory', 'app', 'current')
+const installedCli = join(installedApp, 'server', 'agent-cli.js')
+const installedMcp = join(installedApp, 'server', 'agent-mcp.js')
+const usingInstalledApp = existsSync(installedCli) && existsSync(installedMcp)
+
 const loader = resolve(root, 'node_modules', 'tsx', 'dist', 'loader.mjs')
-const cli = resolve(root, 'server', 'agent-cli.ts')
-const mcp = resolve(root, 'server', 'agent-mcp.ts')
+const sourceCli = resolve(root, 'server', 'agent-cli.ts')
+const sourceMcp = resolve(root, 'server', 'agent-mcp.ts')
 const loaderUrl = pathToFileURL(loader).href
+
+const cliArgs = usingInstalledApp
+  ? [installedCli]
+  : ['--import', loaderUrl, sourceCli]
+const mcpArgs = usingInstalledApp
+  ? [installedMcp]
+  : ['--import', loaderUrl, sourceMcp]
 
 await Promise.all([
   mkdir(binDir, { recursive: true }),
@@ -20,27 +35,27 @@ await Promise.all([
 
 const slash = value => value.replaceAll('\\', '/')
 const shellNode = slash(node)
-const shellCli = slash(cli)
-const shellMcp = slash(mcp)
+const shellQuote = value => "'" + slash(value).replaceAll("'", "'\\''") + "'"
+const cmdQuote = value => '"' + value.replaceAll('"', '""') + '"'
 
 const bashCli = `#!/usr/bin/env bash
 set -euo pipefail
-exec '${shellNode}' --import '${loaderUrl}' '${shellCli}' "$@"
+exec '${shellNode}' ${cliArgs.map(shellQuote).join(' ')} "$@"
 `
 
 const bashMcp = `#!/usr/bin/env bash
 set -euo pipefail
-exec '${shellNode}' --import '${loaderUrl}' '${shellMcp}'
+exec '${shellNode}' ${mcpArgs.map(shellQuote).join(' ')}
 `
 
 const cmdCli = `@echo off
 setlocal
-"${node}" --import "${loaderUrl}" "${cli}" %*
+"${node}" ${cliArgs.map(cmdQuote).join(' ')} %*
 `
 
 const cmdMcp = `@echo off
 setlocal
-"${node}" --import "${loaderUrl}" "${mcp}"
+"${node}" ${mcpArgs.map(cmdQuote).join(' ')}
 `
 
 await Promise.all([
@@ -54,6 +69,11 @@ await Promise.all([
   chmod(join(binDir, 'gpt-observatory-mcp'), 0o755).catch(() => {}),
 ])
 
+const explicitMcpArgs = mcpArgs.map(arg => `  ${arg}`).join('\n')
+const modeLabel = usingInstalledApp
+  ? 'installed application snapshot'
+  : 'source development checkout'
+
 const skill = `---
 name: gpt-observatory
 description: Use when an agent needs to recover, inspect, search, or append factual state about ongoing GPT/agent work across conversations, tasks, repositories, experiments, runs, processes, or hosts. Prefer Observatory over reconstructing state from chat summaries when authoritative local state is needed.
@@ -62,6 +82,8 @@ description: Use when an agent needs to recover, inspect, search, or append fact
 # GPT Observatory
 
 GPT Observatory is the local factual state system at \`http://127.0.0.1:4317\`.
+
+Current launcher mode: **${modeLabel}**.
 
 ## Authority
 
@@ -113,9 +135,7 @@ Explicit MCP process configuration:
 \`\`\`text
 command: ${node}
 args:
-  --import
-  ${loaderUrl}
-  ${mcp}
+${explicitMcpArgs}
 \`\`\`
 
 Tools:
@@ -135,6 +155,7 @@ await writeFile(join(skillDir, 'SKILL.md'), skill, 'utf8')
 
 console.log(JSON.stringify({
   root,
+  mode: usingInstalledApp ? 'installed-app' : 'source-development',
   binDir,
   skillDir,
   commands: [

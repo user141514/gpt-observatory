@@ -58,6 +58,22 @@ export interface ObserveResult {
   unchangedAttributes: string[]
 }
 
+export interface CurrentFactDetail {
+  id: string
+  attribute: string
+  value: unknown
+  validFrom: string
+  recordedAt: string
+  observationId: string
+  observedAt?: string
+  observationStatus?: string
+  source?: {
+    key: string
+    type: string
+    authorityScope?: string
+  }
+}
+
 export interface CurrentEntity {
   id: string
   stableKey: string
@@ -66,6 +82,7 @@ export interface CurrentEntity {
   metadata: Record<string, unknown>
   lastObservedAt?: string
   currentFacts: Record<string, unknown>
+  factDetails: CurrentFactDetail[]
 }
 
 type DbRow = Record<string, any>
@@ -427,22 +444,84 @@ export function createStore(db: ObservatoryDb) {
         'SELECT * FROM fact WHERE valid_to IS NONE ORDER BY entity, attribute',
       ),
     )
-    const observationRows = rows(
+    const factObservationIds = [
+      ...new Map(
+        factRows
+          .filter(fact => fact.observation)
+          .map(fact => [idString(fact.observation), fact.observation]),
+      ).values(),
+    ]
+    const observationRows = factObservationIds.length
+      ? rows(
+          await db.query(
+            'SELECT id, entity, source, observed_at, status FROM observation WHERE id IN $ids',
+            { ids: factObservationIds },
+          ),
+        )
+      : []
+    const sourceIds = [
+      ...new Map(
+        observationRows
+          .filter(observation => observation.source)
+          .map(observation => [idString(observation.source), observation.source]),
+      ).values(),
+    ]
+    const sourceRows = sourceIds.length
+      ? rows(
+          await db.query(
+            'SELECT id, key, type, authority_scope FROM source WHERE id IN $ids',
+            { ids: sourceIds },
+          ),
+        )
+      : []
+    const lastObservedRows = rows(
       await db.query(
-        'SELECT entity, observed_at FROM observation ORDER BY observed_at DESC LIMIT 1000',
+        'SELECT entity, observed_at FROM observation ORDER BY observed_at DESC',
       ),
     )
 
+    const observationsById = new Map(
+      observationRows.map(observation => [idString(observation.id), observation]),
+    )
+    const sourcesById = new Map(
+      sourceRows.map(source => [idString(source.id), source]),
+    )
+
     const factsByEntity = new Map<string, Record<string, unknown>>()
+    const factDetailsByEntity = new Map<string, CurrentFactDetail[]>()
     for (const fact of factRows) {
       const key = idString(fact.entity)
       const facts = factsByEntity.get(key) ?? {}
       facts[fact.attribute] = toJsonValue(fact.value)
       factsByEntity.set(key, facts)
+
+      const observation = observationsById.get(idString(fact.observation))
+      const source = observation
+        ? sourcesById.get(idString(observation.source))
+        : undefined
+      const details = factDetailsByEntity.get(key) ?? []
+      details.push({
+        id: idString(fact.id),
+        attribute: fact.attribute,
+        value: toJsonValue(fact.value),
+        validFrom: iso(fact.valid_from),
+        recordedAt: iso(fact.recorded_at),
+        observationId: idString(fact.observation),
+        observedAt: observation ? iso(observation.observed_at) : undefined,
+        observationStatus: observation?.status,
+        source: source
+          ? {
+              key: source.key,
+              type: source.type,
+              authorityScope: source.authority_scope,
+            }
+          : undefined,
+      })
+      factDetailsByEntity.set(key, details)
     }
 
     const lastObserved = new Map<string, string>()
-    for (const observation of observationRows) {
+    for (const observation of lastObservedRows) {
       const key = idString(observation.entity)
       if (!lastObserved.has(key)) {
         lastObserved.set(key, iso(observation.observed_at))
@@ -457,6 +536,8 @@ export function createStore(db: ObservatoryDb) {
       metadata: toJsonValue(entity.metadata) as Record<string, unknown>,
       lastObservedAt: lastObserved.get(idString(entity.id)),
       currentFacts: factsByEntity.get(idString(entity.id)) ?? {},
+      factDetails: (factDetailsByEntity.get(idString(entity.id)) ?? [])
+        .sort((a, b) => a.attribute.localeCompare(b.attribute)),
     }))
   }
 

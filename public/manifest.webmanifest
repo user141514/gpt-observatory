@@ -1,0 +1,17 @@
+{
+  "name": "GPT Observatory",
+  "short_name": "Observatory",
+  "description": "Local factual state system for supervised GPT and agent work.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4f5f3",
+  "theme_color": "#3c464c",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

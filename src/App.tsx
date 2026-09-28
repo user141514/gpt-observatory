@@ -1,8 +1,45 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import cytoscape, { type Core } from 'cytoscape'
+import {
+  Activity,
+  AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
+  Bot,
+  Box,
+  CheckCircle2,
+  CircleHelp,
+  Clock3,
+  Cpu,
+  Database,
+  ExternalLink,
+  FileText,
+  FlaskConical,
+  FolderGit2,
+  GitBranch,
+  History,
+  Info,
+  Layers3,
+  Maximize2,
+  MessageSquareText,
+  Monitor,
+  Network,
+  Orbit,
+  RefreshCw,
+  Search as SearchIcon,
+  Server,
+  ShieldCheck,
+  Sparkles,
+  Waypoints,
+  ZoomIn,
+  ZoomOut,
+  type LucideIcon,
+} from 'lucide-react'
 import { api } from './api'
 import type {
+  CurrentEntity,
+  CurrentFactDetail,
   GraphResponse,
   NowResponse,
   SearchResult,
@@ -15,12 +52,12 @@ import './App.css'
 type Tab = 'tasks' | 'now' | 'timeline' | 'graph' | 'search'
 type GraphNode = GraphResponse['nodes'][number]
 
-const tabs: Array<{ id: Tab; zh: string; en: string }> = [
-  { id: 'tasks', zh: '监督任务', en: 'SUPERVISED TASKS' },
-  { id: 'now', zh: '事实视图', en: 'CURRENT FACTS' },
-  { id: 'timeline', zh: '时间线', en: 'TIMELINE' },
-  { id: 'graph', zh: '知识图谱', en: 'KNOWLEDGE GRAPH' },
-  { id: 'search', zh: '语义检索', en: 'SEMANTIC SEARCH' },
+const tabs: Array<{ id: Tab; zh: string; en: string; icon: LucideIcon }> = [
+  { id: 'tasks', zh: '监督任务', en: 'SUPERVISED TASKS', icon: ShieldCheck },
+  { id: 'now', zh: '事实视图', en: 'FACT EXPLORER', icon: Database },
+  { id: 'timeline', zh: '时间线', en: 'TIMELINE', icon: History },
+  { id: 'graph', zh: '知识图谱', en: 'KNOWLEDGE GRAPH', icon: Waypoints },
+  { id: 'search', zh: '语义检索', en: 'SEMANTIC SEARCH', icon: SearchIcon },
 ]
 
 export default function App() {
@@ -90,6 +127,7 @@ export default function App() {
             </div>
 
             <div className="hero-title-row">
+              <div className="brand-mark" aria-hidden="true"><Orbit size={24} strokeWidth={1.7} /></div>
               <h1>GPT 观测站</h1>
               <span>GPT Observatory</span>
             </div>
@@ -115,7 +153,7 @@ export default function App() {
               onClick={() => void refresh()}
               disabled={refreshing}
             >
-              <span className={refreshing ? 'refresh-icon spinning' : 'refresh-icon'} aria-hidden="true">↻</span>
+              <RefreshCw className={refreshing ? 'refresh-icon spinning' : 'refresh-icon'} size={16} aria-hidden="true" />
               <span>{refreshing ? '同步中' : '刷新'}<small>{refreshing ? 'SYNCING' : 'REFRESH'}</small></span>
             </button>
           </div>
@@ -144,17 +182,21 @@ export default function App() {
         </section>
 
         <nav className="view-nav" aria-label="Observatory views">
-          {tabs.map(item => (
-            <button
-              className={tab === item.id ? 'view-tab active' : 'view-tab'}
-              onClick={() => setTab(item.id)}
-              key={item.id}
-              type="button"
-            >
-              <span>{item.zh}</span>
-              <small>{item.en}</small>
-            </button>
-          ))}
+          {tabs.map(item => {
+            const Icon = item.icon
+            return (
+              <button
+                className={tab === item.id ? 'view-tab active' : 'view-tab'}
+                onClick={() => setTab(item.id)}
+                key={item.id}
+                type="button"
+              >
+                <Icon className="view-tab-icon" size={17} strokeWidth={1.8} />
+                <span>{item.zh}</span>
+                <small>{item.en}</small>
+              </button>
+            )
+          })}
         </nav>
 
         {error && (
@@ -375,44 +417,495 @@ function taskStatus(task: SupervisedTask, integrationAvailable: boolean) {
 }
 
 function Now({ data }: { data: NowResponse }) {
+  const [entityQuery, setEntityQuery] = useState('')
+  const [typeFilter, setTypeFilter] = useState('all')
+  const [selectedEntityId, setSelectedEntityId] = useState<string | undefined>(
+    data.entities[0]?.id,
+  )
+
+  const entityTypes = useMemo(
+    () => [...new Set(data.entities.map(entity => entity.type))].sort(),
+    [data.entities],
+  )
+
+  const filteredEntities = useMemo(() => {
+    const query = entityQuery.trim().toLocaleLowerCase()
+    return data.entities.filter(entity => {
+      if (typeFilter !== 'all' && entity.type !== typeFilter) return false
+      if (!query) return true
+      return [
+        entity.label,
+        entity.stableKey,
+        entity.type,
+        ...Object.keys(entity.currentFacts),
+      ].some(item => item.toLocaleLowerCase().includes(query))
+    })
+  }, [data.entities, entityQuery, typeFilter])
+
   if (!data.entities.length) return <Empty zh="暂无观测" en="No observations yet." />
 
+  const selected = filteredEntities.find(entity => entity.id === selectedEntityId)
+    ?? filteredEntities[0]
+  const groups = selected ? groupFacts(selected) : []
+  const sources = selected ? summarizeSources(selected.factDetails) : []
+
   return (
-    <section>
+    <section className="facts-section">
       <SectionHeading
-        kickerZh="实时事实"
-        kickerEn="CURRENT FACTS"
-        titleZh="当前状态"
-        titleEn="Current State"
-        meta={`${data.entities.length} 个实体 / ${data.entities.length} entities`}
+        kickerZh="可追溯的当前事实"
+        kickerEn="TRACEABLE CURRENT STATE"
+        titleZh="事实浏览器"
+        titleEn="Fact Explorer"
+        meta={`${data.entities.length} 个实体 · ${data.counts.facts ?? 0} 条事实`}
       />
 
-      <div className="cards">
-        {data.entities.map(entity => (
-          <article key={entity.id}>
-            <div className="cardhead">
-              <div>
-                <EntityTypeBadge type={entity.type} />
-                <h2>{entity.label}</h2>
-              </div>
-              <time>{time(entity.lastObservedAt)}</time>
+      <div className="facts-toolbar">
+        <label className="facts-search">
+          <SearchIcon size={15} strokeWidth={1.8} aria-hidden="true" />
+          <input
+            value={entityQuery}
+            onChange={event => setEntityQuery(event.target.value)}
+            placeholder="搜索实体、稳定键或字段 / Search entities, keys or facts"
+          />
+        </label>
+        <div className="facts-type-filters" aria-label="Entity type filters">
+          <button
+            type="button"
+            className={typeFilter === 'all' ? 'active' : ''}
+            onClick={() => setTypeFilter('all')}
+          >
+            <Layers3 size={13} />
+            全部 <small>ALL</small>
+          </button>
+          {entityTypes.map(type => {
+            const label = typeLabel(type)
+            return (
+              <button
+                type="button"
+                className={typeFilter === type ? 'active' : ''}
+                onClick={() => setTypeFilter(type)}
+                key={type}
+              >
+                <EntityIcon type={type} size={13} />
+                {label.zh} <small>{label.en}</small>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="facts-workbench">
+        <aside className="facts-entity-browser">
+          <div className="facts-pane-heading">
+            <div>
+              <span>实体</span>
+              <small>ENTITIES</small>
             </div>
+            <b>{filteredEntities.length}</b>
+          </div>
 
-            <code className="key">{entity.stableKey}</code>
+          <div className="facts-entity-list">
+            {filteredEntities.map(entity => {
+              const label = typeLabel(entity.type)
+              const active = selected?.id === entity.id
+              return (
+                <button
+                  type="button"
+                  className={active ? 'facts-entity-item active' : 'facts-entity-item'}
+                  onClick={() => setSelectedEntityId(entity.id)}
+                  key={entity.id}
+                >
+                  <span className="entity-icon-shell">
+                    <EntityIcon type={entity.type} size={16} />
+                  </span>
+                  <span className="facts-entity-copy">
+                    <strong>{entity.label}</strong>
+                    <span>{label.zh}<small>{label.en}</small></span>
+                  </span>
+                  <span className="facts-entity-count">{entity.factDetails.length}</span>
+                </button>
+              )
+            })}
+          </div>
+        </aside>
 
-            <dl>
-              {Object.entries(entity.currentFacts).map(([key, fact]) => (
-                <div key={key}>
-                  <dt>{fieldLabel(key)}</dt>
-                  <dd>{value(fact)}</dd>
+        <main className="facts-detail-pane">
+          {selected ? (
+            <>
+              <FactEntityHeader entity={selected} />
+              <div className="fact-summary">
+                <Sparkles size={16} strokeWidth={1.7} aria-hidden="true" />
+                <p>{entitySummary(selected)}</p>
+              </div>
+
+              <div className="fact-groups">
+                {groups.length ? groups.map(group => (
+                  <FactGroupSection
+                    key={group.id}
+                    group={group}
+                  />
+                )) : (
+                  <div className="facts-no-current">
+                    <Info size={18} />
+                    <span>当前没有开放事实 / No current facts.</span>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="facts-no-selection">
+              <Database size={28} strokeWidth={1.45} />
+              <strong>没有匹配的实体</strong>
+              <span>No entity matches the current filters.</span>
+            </div>
+          )}
+        </main>
+
+        <aside className="facts-evidence-pane">
+          <div className="facts-pane-heading">
+            <div>
+              <span>证据与身份</span>
+              <small>EVIDENCE & IDENTITY</small>
+            </div>
+          </div>
+
+          {selected && (
+            <>
+              <section className="facts-context-block">
+                <span className="facts-context-label">稳定身份 <small>STABLE KEY</small></span>
+                <code>{selected.stableKey}</code>
+              </section>
+
+              <section className="facts-context-grid">
+                <div>
+                  <span>当前事实</span>
+                  <strong>{selected.factDetails.length}</strong>
                 </div>
-              ))}
-            </dl>
-          </article>
-        ))}
+                <div>
+                  <span>证据源</span>
+                  <strong>{sources.length}</strong>
+                </div>
+                <div>
+                  <span>最后观测</span>
+                  <strong>{selected.lastObservedAt ? compactTime(selected.lastObservedAt) : '—'}</strong>
+                </div>
+              </section>
+
+              <section className="facts-context-block">
+                <span className="facts-context-label">证据来源 <small>SOURCES</small></span>
+                <div className="facts-source-list">
+                  {sources.length ? sources.map(source => (
+                    <div key={source.key}>
+                      <span className="source-icon"><EyeIconForSource type={source.type} /></span>
+                      <div>
+                        <strong>{source.key}</strong>
+                        <span>{source.type}</span>
+                        {source.authorityScope && <p>{source.authorityScope}</p>}
+                      </div>
+                      <b>{source.count}</b>
+                    </div>
+                  )) : (
+                    <p className="quiet-copy">暂无来源元数据 / No source metadata.</p>
+                  )}
+                </div>
+              </section>
+
+              <section className="facts-context-block">
+                <span className="facts-context-label">实体类型 <small>ENTITY TYPE</small></span>
+                <EntityTypeBadge type={selected.type} />
+              </section>
+
+              {Object.keys(selected.metadata).length > 0 && (
+                <details className="facts-raw-details">
+                  <summary>原始元数据 / Raw metadata</summary>
+                  <pre>{JSON.stringify(selected.metadata, null, 2)}</pre>
+                </details>
+              )}
+            </>
+          )}
+        </aside>
       </div>
     </section>
   )
+}
+
+function FactEntityHeader({ entity }: { entity: CurrentEntity }) {
+  const label = typeLabel(entity.type)
+  return (
+    <header className="fact-entity-header">
+      <div className="fact-entity-icon">
+        <EntityIcon type={entity.type} size={25} />
+      </div>
+      <div>
+        <div className="fact-entity-type">
+          <span>{label.zh}</span>
+          <small>{label.en}</small>
+        </div>
+        <h2>{entity.label}</h2>
+        <p>
+          {entity.lastObservedAt
+            ? `最后观测于 ${dateTime(entity.lastObservedAt)}`
+            : '尚无观测时间 / No observation time'}
+        </p>
+      </div>
+    </header>
+  )
+}
+
+type FactGroupView = {
+  id: FactGroupId
+  zh: string
+  en: string
+  icon: LucideIcon
+  facts: CurrentFactDetail[]
+}
+
+type FactGroupId =
+  | 'core'
+  | 'supervision'
+  | 'health'
+  | 'runtime'
+  | 'product'
+  | 'infrastructure'
+  | 'other'
+
+const FACT_GROUPS: Record<FactGroupId, { zh: string; en: string; icon: LucideIcon }> = {
+  core: { zh: '核心状态', en: 'CORE STATE', icon: Activity },
+  supervision: { zh: '监督状态', en: 'SUPERVISION', icon: ShieldCheck },
+  health: { zh: '服务健康', en: 'SERVICE HEALTH', icon: CheckCircle2 },
+  runtime: { zh: '运行绑定', en: 'RUNTIME BINDINGS', icon: Network },
+  product: { zh: '产品能力', en: 'PRODUCT CAPABILITIES', icon: Sparkles },
+  infrastructure: { zh: '基础设施', en: 'INFRASTRUCTURE', icon: Server },
+  other: { zh: '其他事实', en: 'OTHER FACTS', icon: Layers3 },
+}
+
+function groupFacts(entity: CurrentEntity): FactGroupView[] {
+  const source = entity.factDetails.length
+    ? entity.factDetails
+    : Object.entries(entity.currentFacts).map(([attribute, factValue]) => ({
+        id: `${entity.id}:${attribute}`,
+        attribute,
+        value: factValue,
+        validFrom: entity.lastObservedAt ?? '',
+        recordedAt: entity.lastObservedAt ?? '',
+        observationId: '',
+      }))
+  const groups = new Map<FactGroupId, CurrentFactDetail[]>()
+  for (const fact of source) {
+    const group = factMeta(fact.attribute).group
+    groups.set(group, [...(groups.get(group) ?? []), fact])
+  }
+  const order: FactGroupId[] = [
+    'core',
+    'supervision',
+    'health',
+    'runtime',
+    'product',
+    'infrastructure',
+    'other',
+  ]
+  return order
+    .filter(id => groups.has(id))
+    .map(id => ({
+      id,
+      ...FACT_GROUPS[id],
+      facts: groups.get(id)!.sort((a, b) =>
+        factMeta(a.attribute).zh.localeCompare(factMeta(b.attribute).zh, 'zh-CN')),
+    }))
+}
+
+function FactGroupSection({ group }: { group: FactGroupView }) {
+  const Icon = group.icon
+  return (
+    <section className="fact-group">
+      <div className="fact-group-heading">
+        <span className="fact-group-icon"><Icon size={15} strokeWidth={1.75} /></span>
+        <div>
+          <strong>{group.zh}</strong>
+          <small>{group.en}</small>
+        </div>
+        <b>{group.facts.length}</b>
+      </div>
+      <div className="fact-row-list">
+        {group.facts.map(fact => <FactRow fact={fact} key={fact.id} />)}
+      </div>
+    </section>
+  )
+}
+
+function FactRow({ fact }: { fact: CurrentFactDetail }) {
+  const meta = factMeta(fact.attribute)
+  return (
+    <article className="fact-row">
+      <div className="fact-row-label">
+        <strong>{meta.zh}</strong>
+        <span>{meta.en}</span>
+        <code>{fact.attribute}</code>
+      </div>
+      <div className="fact-row-value">
+        <FactValue value={fact.value} />
+        <div className="fact-provenance">
+          <span>
+            <Clock3 size={11} />
+            {fact.observedAt ? dateTime(fact.observedAt) : dateTime(fact.validFrom)}
+          </span>
+          {fact.source && (
+            <span>
+              <Database size={11} />
+              {fact.source.key}
+            </span>
+          )}
+          {fact.observationStatus && (
+            <span className={`observation-status ${fact.observationStatus}`}>
+              {fact.observationStatus}
+            </span>
+          )}
+        </div>
+        <details className="fact-evidence-details">
+          <summary>证据详情 / Evidence</summary>
+          <dl>
+            <div>
+              <dt>Observation ID</dt>
+              <dd>{fact.observationId || '—'}</dd>
+            </div>
+            <div>
+              <dt>Observed at</dt>
+              <dd>{fact.observedAt ? dateTime(fact.observedAt) : '—'}</dd>
+            </div>
+            <div>
+              <dt>Recorded at</dt>
+              <dd>{dateTime(fact.recordedAt)}</dd>
+            </div>
+            <div>
+              <dt>Valid from</dt>
+              <dd>{dateTime(fact.validFrom)}</dd>
+            </div>
+            {fact.source?.authorityScope && (
+              <div>
+                <dt>Authority scope</dt>
+                <dd>{fact.source.authorityScope}</dd>
+              </div>
+            )}
+          </dl>
+        </details>
+      </div>
+    </article>
+  )
+}
+
+function FactValue({ value: factValue }: { value: unknown }) {
+  if (factValue === null || factValue === undefined) {
+    return (
+      <span className="fact-value-pill unknown">
+        <CircleHelp size={12} />
+        未知 / Unknown
+      </span>
+    )
+  }
+  if (typeof factValue === 'boolean') {
+    return factValue ? (
+      <span className="fact-value-pill positive">
+        <CheckCircle2 size={12} />
+        是 / Yes
+      </span>
+    ) : (
+      <span className="fact-value-pill negative">
+        <AlertTriangle size={12} />
+        否 / No
+      </span>
+    )
+  }
+  if (typeof factValue === 'string' && /^https?:\/\//i.test(factValue)) {
+    return (
+      <a className="fact-link-value" href={factValue} target="_blank" rel="noreferrer">
+        <span>{factValue}</span>
+        <ExternalLink size={12} />
+      </a>
+    )
+  }
+  if (
+    typeof factValue === 'string'
+    && ['active', 'running', 'ready', 'passed', 'verified', 'installed', 'built', 'ok'].includes(
+      factValue.toLocaleLowerCase(),
+    )
+  ) {
+    return <span className="fact-value-pill positive">{factValue}</span>
+  }
+  if (
+    typeof factValue === 'string'
+    && ['degraded', 'failed', 'error', 'blocked', 'unavailable'].includes(
+      factValue.toLocaleLowerCase(),
+    )
+  ) {
+    return <span className="fact-value-pill negative">{factValue}</span>
+  }
+  if (typeof factValue === 'object') {
+    return <pre className="fact-object-value">{JSON.stringify(factValue, null, 2)}</pre>
+  }
+  return <strong className="fact-text-value">{String(factValue)}</strong>
+}
+
+function entitySummary(entity: CurrentEntity) {
+  const facts = entity.currentFacts
+  if (entity.type === 'task') {
+    const phase = stringValue(facts.phase)
+    const status = stringValue(facts.status)
+    const supervised = facts.watchdog_registered === true
+    const operational = facts.watchdog_operational === true
+    const conversation = stringValue(facts.current_conversation_id)
+
+    if (supervised) {
+      return [
+        `这是一个由 Watchdog 监督的任务${operational ? '，监督链路当前可用' : ''}。`,
+        conversation ? `当前执行绑定为 Conversation ${conversation.slice(0, 8)}。` : '',
+      ].filter(Boolean).join(' ')
+    }
+    if (phase || status) {
+      return `当前${phase ? `工作阶段为「${phase}」` : ''}${phase && status ? '，' : ''}${status ? `状态为「${status}」` : ''}。`
+    }
+  }
+  if (entity.type === 'conversation') {
+    if (facts.watchdog_bound === true) {
+      return `这个对话当前承载一个受监督任务，Watchdog 状态为「${stringValue(facts.watchdog_state) ?? 'unknown'}」。`
+    }
+    return '这是一个已记录的 GPT 对话执行载体。'
+  }
+  if (entity.type === 'service') {
+    const ready = facts.ready === true
+    const fresh = facts.polling_fresh === true
+    return `服务当前${ready ? '已就绪' : '未就绪'}，观测数据${fresh ? '保持新鲜' : '可能过期'}。`
+  }
+  if (entity.type === 'repo') {
+    return '这是被事实系统引用的代码仓库实体；具体作用由关系图中的事实边说明。'
+  }
+  return `当前记录 ${entity.factDetails.length} 条开放事实；下方仅展示有来源的当前状态，不推断未观测信息。`
+}
+
+function summarizeSources(facts: CurrentFactDetail[]) {
+  const map = new Map<string, {
+    key: string
+    type: string
+    authorityScope?: string
+    count: number
+  }>()
+  for (const fact of facts) {
+    if (!fact.source) continue
+    const current = map.get(fact.source.key)
+    map.set(fact.source.key, {
+      key: fact.source.key,
+      type: fact.source.type,
+      authorityScope: fact.source.authorityScope ?? current?.authorityScope,
+      count: (current?.count ?? 0) + 1,
+    })
+  }
+  return [...map.values()].sort((a, b) => b.count - a.count || a.key.localeCompare(b.key))
+}
+
+function EyeIconForSource({ type }: { type: string }) {
+  if (type.includes('watchdog')) return <ShieldCheck size={13} strokeWidth={1.75} />
+  if (type.includes('agent')) return <Bot size={13} strokeWidth={1.75} />
+  if (type.includes('migration')) return <GitBranch size={13} strokeWidth={1.75} />
+  return <Database size={13} strokeWidth={1.75} />
 }
 
 function Timeline({ events }: { events: TimelineEvent[] }) {
@@ -780,7 +1273,9 @@ function GraphWorkbench({ data }: { data: GraphResponse }) {
                 }}
                 placeholder="名称或类型 / label or type"
               />
-              <button type="button" onClick={locateFirstMatch}>⌕</button>
+              <button type="button" onClick={locateFirstMatch} aria-label="查找节点 / Find node">
+                <SearchIcon size={14} />
+              </button>
             </div>
           </label>
 
@@ -827,9 +1322,16 @@ function GraphWorkbench({ data }: { data: GraphResponse }) {
               <small>RELATION CANVAS</small>
             </div>
             <div className="graph-controls">
-              <button type="button" onClick={() => zoom(1.18)} title="放大 / Zoom in">＋</button>
-              <button type="button" onClick={() => zoom(0.84)} title="缩小 / Zoom out">−</button>
-              <button type="button" className="fit-button" onClick={fitGraph}>适配 <small>FIT</small></button>
+              <button type="button" onClick={() => zoom(1.18)} title="放大 / Zoom in" aria-label="放大 / Zoom in">
+                <ZoomIn size={14} />
+              </button>
+              <button type="button" onClick={() => zoom(0.84)} title="缩小 / Zoom out" aria-label="缩小 / Zoom out">
+                <ZoomOut size={14} />
+              </button>
+              <button type="button" className="fit-button" onClick={fitGraph}>
+                <Maximize2 size={12} />
+                适配 <small>FIT</small>
+              </button>
             </div>
           </div>
 
@@ -848,7 +1350,7 @@ function GraphWorkbench({ data }: { data: GraphResponse }) {
             <NodeInspector node={selectedNode} relations={selectedRelations} />
           ) : (
             <div className="inspector-empty">
-              <div>◎</div>
+              <CircleHelp size={28} strokeWidth={1.45} />
               <strong>选择一个节点</strong>
               <span>Select a node to inspect factual state and relations.</span>
             </div>
@@ -901,7 +1403,9 @@ function NodeInspector({
             {relations.map(relation => (
               <div key={relation.id}>
                 <span className={relation.direction === 'out' ? 'relation-direction out' : 'relation-direction in'}>
-                  {relation.direction === 'out' ? '→' : '←'}
+                  {relation.direction === 'out'
+                    ? <ArrowRight size={12} />
+                    : <ArrowLeft size={12} />}
                 </span>
                 <div>
                   <strong>{relation.predicate}</strong>
@@ -961,7 +1465,7 @@ function Search({
 
       <form onSubmit={submit}>
         <div className="search-input-wrap">
-          <span aria-hidden="true">⌕</span>
+          <SearchIcon size={15} strokeWidth={1.8} aria-hidden="true" />
           <input
             value={query}
             onChange={event => setQuery(event.target.value)}
@@ -1024,7 +1528,7 @@ function EntityTypeBadge({ type }: { type: string }) {
 function Empty({ zh, en }: { zh: string; en: string }) {
   return (
     <div className="empty">
-      <div className="empty-mark" aria-hidden="true">◎</div>
+      <Database className="empty-mark" size={30} strokeWidth={1.4} aria-hidden="true" />
       <strong>{zh}</strong>
       <span>{en}</span>
     </div>
@@ -1113,29 +1617,106 @@ function transitionSummary(event: TimelineEvent) {
     ?? `「${event.entityLabel}」的${field}从「${previous}」变化为「${next}」。`
 }
 
-function fieldLabel(key: string) {
-  const labels: Record<string, string> = {
-    status: '状态 / status',
-    phase: '阶段 / phase',
-    canonical_db: '事实库 / canonical DB',
-    web_ui: '网页界面 / web UI',
-    ui: '视觉界面 / UI',
-    tests: '测试 / tests',
-    obsidian_projection: 'Obsidian 投影 / projection',
-    agent_cli: '智能体 CLI / agent CLI',
-    agent_mcp: '智能体 MCP / agent MCP',
-    global_skill: '全局技能 / global skill',
-    orca_access: 'Orca 接入 / Orca access',
+type FactFieldMeta = {
+  zh: string
+  en: string
+  group: FactGroupId
+}
+
+const FACT_FIELD_META: Record<string, FactFieldMeta> = {
+  status: { zh: '状态', en: 'Status', group: 'core' },
+  phase: { zh: '工作阶段', en: 'Phase', group: 'core' },
+  current_conversation_id: { zh: '当前对话', en: 'Current conversation', group: 'runtime' },
+  binding_changed_at: { zh: '绑定更新时间', en: 'Binding changed at', group: 'runtime' },
+  target_url: { zh: '目标地址', en: 'Target URL', group: 'runtime' },
+  watchdog_bound: { zh: 'Watchdog 绑定', en: 'Watchdog bound', group: 'runtime' },
+  watchdog_registered: { zh: '已纳入监督', en: 'Registered', group: 'supervision' },
+  watchdog_state: { zh: '监督状态', en: 'Watchdog state', group: 'supervision' },
+  watchdog_connected: { zh: '监督连接', en: 'Connected', group: 'supervision' },
+  watchdog_operational: { zh: '监督可用', en: 'Operational', group: 'supervision' },
+  watchdog_consecutive_failures: { zh: '连续失败', en: 'Consecutive failures', group: 'supervision' },
+  watchdog_last_error: { zh: '最近错误', en: 'Last error', group: 'supervision' },
+  watchdog_last_poll_at: { zh: '最近轮询', en: 'Last poll', group: 'supervision' },
+  watchdog_last_success_at: { zh: '最近成功', en: 'Last success', group: 'supervision' },
+  watchdog_registered_at: { zh: '监督注册时间', en: 'Registered at', group: 'supervision' },
+  task_identity_source: { zh: '任务身份来源', en: 'Task identity source', group: 'supervision' },
+  watchdog_live_gate: { zh: 'Watchdog 实机验收', en: 'Watchdog live gate', group: 'supervision' },
+  watchdog_protocol: { zh: 'Watchdog 协议', en: 'Watchdog protocol', group: 'supervision' },
+  supervision_model: { zh: '监督模型', en: 'Supervision model', group: 'supervision' },
+  ready: { zh: '服务就绪', en: 'Ready', group: 'health' },
+  polling_fresh: { zh: '轮询新鲜度', en: 'Polling fresh', group: 'health' },
+  active_count: { zh: '活动任务数', en: 'Active count', group: 'health' },
+  degraded_count: { zh: '异常任务数', en: 'Degraded count', group: 'health' },
+  last_poll_error: { zh: '轮询错误', en: 'Last poll error', group: 'health' },
+  protocol_version: { zh: '协议版本', en: 'Protocol version', group: 'health' },
+  ui: { zh: '视觉界面', en: 'UI system', group: 'product' },
+  graph_ui: { zh: '图谱界面', en: 'Graph UI', group: 'product' },
+  web_ui: { zh: '网页界面', en: 'Web UI', group: 'product' },
+  bilingual_ui: { zh: '双语界面', en: 'Bilingual UI', group: 'product' },
+  typography: { zh: '字体层级', en: 'Typography', group: 'product' },
+  agent_cli: { zh: '智能体 CLI', en: 'Agent CLI', group: 'product' },
+  agent_mcp: { zh: '智能体 MCP', en: 'Agent MCP', group: 'product' },
+  global_skill: { zh: '全局技能', en: 'Global skill', group: 'product' },
+  orca_access: { zh: 'Orca 接入', en: 'Orca access', group: 'product' },
+  orca_review: { zh: 'Orca 审核', en: 'Orca review', group: 'product' },
+  canonical_db: { zh: '事实数据库', en: 'Canonical DB', group: 'infrastructure' },
+  obsidian_projection: { zh: 'Obsidian 投影', en: 'Obsidian projection', group: 'infrastructure' },
+  tests: { zh: '测试状态', en: 'Tests', group: 'infrastructure' },
+}
+
+function factMeta(key: string): FactFieldMeta {
+  const known = FACT_FIELD_META[key]
+  if (known) return known
+
+  const human = key
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, char => char.toUpperCase())
+  return {
+    zh: key.replace(/_/g, ' '),
+    en: human,
+    group: 'other',
   }
-  return labels[key] ?? key
+}
+
+function fieldLabel(key: string) {
+  const meta = factMeta(key)
+  return `${meta.zh} / ${meta.en}`
+}
+
+function EntityIcon({ type, size = 16 }: { type: string; size?: number }) {
+  const props = { size, strokeWidth: 1.75 }
+  if (type === 'task') return <ShieldCheck {...props} />
+  if (type === 'conversation') return <MessageSquareText {...props} />
+  if (type === 'agent' || type === 'agent_session') return <Bot {...props} />
+  if (type === 'project') return <Layers3 {...props} />
+  if (type === 'repo') return <FolderGit2 {...props} />
+  if (type === 'branch' || type === 'worktree') return <GitBranch {...props} />
+  if (type === 'experiment') return <FlaskConical {...props} />
+  if (type === 'run') return <Activity {...props} />
+  if (type === 'process') return <Cpu {...props} />
+  if (type === 'host') return <Monitor {...props} />
+  if (type === 'service') return <Server {...props} />
+  if (type === 'file') return <FileText {...props} />
+  if (type === 'artifact') return <Box {...props} />
+  return <Database {...props} />
+}
+
+function stringValue(v: unknown) {
+  return typeof v === 'string' && v.length ? v : undefined
 }
 
 function value(v: unknown) {
   return v === undefined ? '∅' : typeof v === 'string' ? v : JSON.stringify(v)
 }
 
-function time(v?: string) {
-  return v ? new Date(v).toLocaleTimeString('zh-CN', { hour12: false }) : '未观测 / unobserved'
+function compactTime(v: string) {
+  return new Date(v).toLocaleString('zh-CN', {
+    hour12: false,
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
 
 function dateTime(v: string) {

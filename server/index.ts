@@ -1,3 +1,6 @@
+import { existsSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import express from 'express'
 import { z } from 'zod'
 import { createDatabase } from './db.js'
@@ -47,7 +50,12 @@ const relationSchema = z.object({
 })
 
 app.get('/api/health', async (_req, res) => {
-  res.json({ ok: true, counts: await store.counts() })
+  res.json({
+    ok: true,
+    service: 'gpt-observatory',
+    apiVersion: 1,
+    counts: await store.counts(),
+  })
 })
 
 app.get('/api/now', async (_req, res) => {
@@ -113,6 +121,29 @@ app.post('/api/semantic/reindex', async (_req, res, next) => {
     next(error)
   }
 })
+
+const moduleDir = dirname(fileURLToPath(import.meta.url))
+const distDir = resolve(moduleDir, '../dist')
+const indexFile = join(distDir, 'index.html')
+
+app.use('/api', (_req, res) => {
+  res.status(404).json({ error: 'not_found' })
+})
+
+if (existsSync(indexFile)) {
+  app.use(express.static(distDir, {
+    index: false,
+    immutable: false,
+    maxAge: '1h',
+  }))
+  app.use((req, res, next) => {
+    if (req.method !== 'GET' || req.path.startsWith('/api/')) {
+      next()
+      return
+    }
+    res.sendFile(indexFile)
+  })
+}
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(error)

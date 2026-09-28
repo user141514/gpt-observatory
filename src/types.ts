@@ -1,3 +1,19 @@
+export interface CurrentFactDetail {
+  id: string
+  attribute: string
+  value: unknown
+  validFrom: string
+  recordedAt: string
+  observationId: string
+  observedAt?: string
+  observationStatus?: string
+  source?: {
+    key: string
+    type: string
+    authorityScope?: string
+  }
+}
+
 export interface CurrentEntity {
   id: string
   stableKey: string
@@ -6,6 +22,7 @@ export interface CurrentEntity {
   metadata: Record<string, unknown>
   lastObservedAt?: string
   currentFacts: Record<string, unknown>
+  factDetails: CurrentFactDetail[]
 }
 
 export interface NowResponse {

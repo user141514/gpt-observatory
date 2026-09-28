@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { readFile, rm } from 'node:fs/promises'
+import { rm } from 'node:fs/promises'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { spawnSync } from 'node:child_process'
@@ -34,17 +34,28 @@ const homeRoot = resolve(
 const runtimeDir = resolve(homeRoot, installedMode ? 'runtime' : '.runtime')
 const pidFile = resolve(runtimeDir, 'server.pid')
 const port = Number(process.env.OBSERVATORY_PORT ?? 4317)
+const url = process.env.OBSERVATORY_URL ?? `http://127.0.0.1:${port}/`
+const healthUrl = new URL('/api/health', url).href
 
-let pid = await readPidFile()
-if (!pid || !isObservatoryProcess(pid)) {
-  pid = discoverServerPid()
-}
+const listenerPid = discoverListenerPid()
 
-if (!pid) {
+if (!listenerPid) {
   await rm(pidFile, { force: true })
   console.log('GPT Observatory is not running.')
   process.exit(0)
 }
+
+const exactProcess = isObservatoryProcess(listenerPid)
+const signedHealth = await healthy()
+
+if (!exactProcess || !signedHealth) {
+  console.error(
+    `Refusing to stop PID ${listenerPid}: Observatory identity could not be jointly verified (process=${exactProcess}, health=${signedHealth}).`,
+  )
+  process.exit(1)
+}
+
+const pid = listenerPid
 
 if (process.platform === 'win32') {
   spawnSync('taskkill.exe', ['/PID', String(pid), '/T', '/F'], {
@@ -60,16 +71,6 @@ if (process.platform === 'win32') {
 await rm(pidFile, { force: true })
 console.log(`GPT Observatory stopped (PID ${pid}).`)
 
-async function readPidFile() {
-  try {
-    const raw = await readFile(pidFile, 'utf8')
-    const value = Number(raw.trim())
-    return Number.isInteger(value) && value > 0 ? value : undefined
-  } catch {
-    return undefined
-  }
-}
-
 function isObservatoryProcess(targetPid) {
   if (process.platform !== 'win32') {
     try {
@@ -82,7 +83,7 @@ function isObservatoryProcess(targetPid) {
   return matchesExpectedProcess(processInfoForPid(targetPid))
 }
 
-function discoverServerPid() {
+function discoverListenerPid() {
   if (process.platform !== 'win32') return undefined
   const script = [
     `$c=Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1`,
@@ -96,8 +97,20 @@ function discoverServerPid() {
   )
   if (result.status !== 0) return undefined
   const pid = Number(result.stdout.trim())
-  if (!Number.isInteger(pid) || pid <= 0) return undefined
-  return matchesExpectedProcess(processInfoForPid(pid)) ? pid : undefined
+  return Number.isInteger(pid) && pid > 0 ? pid : undefined
+}
+
+async function healthy() {
+  try {
+    const response = await fetch(healthUrl, {
+      signal: AbortSignal.timeout(900),
+    })
+    if (!response.ok) return false
+    const body = await response.json()
+    return body?.ok === true && body?.service === 'gpt-observatory'
+  } catch {
+    return false
+  }
 }
 
 function processInfoForPid(targetPid) {

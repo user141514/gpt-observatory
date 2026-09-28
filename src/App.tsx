@@ -237,10 +237,22 @@ function Timeline({ events }: { events: TimelineEvent[] }) {
                 <code>{event.initial ? '∅' : value(event.from)}</code>
                 <span className="arrow">→</span>
                 <code>{value(event.to)}</code>
+                {event.initial && (
+                  <span
+                    className="first-observation-mark"
+                    title="首次观测 / First observed"
+                    aria-label="首次观测 / First observed"
+                    data-label="首次观测 · First observed"
+                  >
+                    ✦
+                  </span>
+                )}
               </p>
-              <div className="transition-note">
-                {transitionSummary(event)}
-              </div>
+              {!event.initial && (
+                <div className="transition-note">
+                  {transitionSummary(event)}
+                </div>
+              )}
             </div>
           </article>
         ))}
@@ -863,10 +875,6 @@ function typeLabel(type: string): { zh: string; en: string } {
 function transitionSummary(event: TimelineEvent) {
   const field = fieldLabel(event.attribute).split(' / ')[0]
   const next = value(event.to)
-
-  if (event.initial) {
-    return `首次观测到「${event.entityLabel}」的${field}为「${next}」。`
-  }
 
   const previous = value(event.from)
   const templates: Record<string, string> = {

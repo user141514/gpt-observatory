@@ -75,6 +75,12 @@ A factual edge between two entities, also with a validity interval and observati
 ### Semantic document
 A canonical textual serialization of factual state or a factual change, with a local 384-dimensional embedding.
 
+Embedding backend contract:
+- preferred: pinned `Xenova/all-MiniLM-L6-v2@751bff37182d3f1213fa05d7196b954e230abad9#q8`, prepared under stable user storage and verified by SHA-256;
+- runtime remote-model access is disabled;
+- if the local model is absent or cannot load, semantic search falls back to deterministic `observatory/local-hash-384-v1` rather than failing or reaching the network;
+- the semantic index records its embedding model and self-heals when the current backend or source fact set changes.
+
 ## Structured residual
 
 | Residual | Required evidence | Status |
@@ -83,11 +89,11 @@ A canonical textual serialization of factual state or a factual change, with a l
 | R1 unchanged != unknown | same-value observation increments observations, not facts | passed: unit + live observation evidence |
 | R2 factual timeline | changed value closes old fact and opens new fact | passed: unit test + live phase transition |
 | R3 knowledge graph | current factual relations render as traversable graph | passed: relation de-duplication test + live USES edge |
-| R4 vector retrieval | local embedding + SurrealDB HNSW returns semantic neighbours | passed: local MiniLM query returned task/repo neighbours |
+| R4 vector retrieval | local embedding + SurrealDB HNSW returns semantic neighbours | passed: pinned q8 MiniLM local-only embedding works at 384 dimensions; offline fallback + self-healing semantic-index test also passes |
 | R5 human visual acceptance | NOW / TIMELINE / GRAPH / SEARCH use live API data | ready for human acceptance at local Vite UI on port 4318 |
 | R6 Obsidian projection | generated Markdown + .base files contain wikilinks/frontmatter | passed: API-backed export generated vault successfully |
-| R7 GPT conversation ingestion | Watchdog registered Task → current Conversation projection; Relay only resolves runtime Tab for registered conversations | passed in source tests; live task-first Watchdog deployment pending |
-| R8 Watchdog supervision | task-first registry survives process restart and a real poll cycle with fresh success | source contract passed; live runtime deployment/poll still pending |
+| R7 GPT conversation ingestion | Watchdog registered Task → current Conversation projection; Relay only resolves runtime Tab for registered conversations | passed: source tests + live protocol-v3 task-first projection |
+| R8 Watchdog supervision | task-first registry survives process restart and a real poll cycle with fresh success | passed: live deployed protocol v3, persisted task identity, real successful poll, and Observatory projection |
 
 ## Acceptance scenarios
 

@@ -10,7 +10,7 @@ The canonical store is embedded SurrealDB. Observations are append-only evidence
 - **FACT EXPLORER** — current factual state grouped by meaning, with source authority plus observation / recorded / valid-from evidence details.
 - **TIMELINE** — actual fact-version transitions.
 - **KNOWLEDGE GRAPH** — current factual relations.
-- **SEMANTIC SEARCH** — local semantic retrieval over factual state.
+- **SEMANTIC SEARCH** — local semantic retrieval over factual state. The installed app uses a pinned q8 MiniLM model from local user storage; remote model loading is disabled at runtime, with a deterministic 384-dimensional local-hash fallback if the model is unavailable.
 - **Obsidian projection** — generated entity notes, wikilinks, dashboard, and Base definition.
 
 ## Install the local app
@@ -29,6 +29,7 @@ On Windows this creates an independent local installation:
 ├─ app\current\        compiled UI + server + production dependencies
 ├─ data\observatory     canonical RocksDB (survives app upgrades)
 ├─ launcher\            stable start / stop entrypoints
+├─ models\              pinned local MiniLM embedding model
 ├─ runtime\             PID and logs
 └─ GPT Observatory.ico
 ```
@@ -41,7 +42,7 @@ It also creates:
 - `gpt-observatory` and `gpt-observatory-mcp` backed by the installed compiled JS, not the Git checkout.
 - The user `bin` directory on the Windows User PATH when needed.
 
-The installed app does not depend on the source checkout or its `node_modules`. Development and installed runtimes both use the same stable user-data home, so there is only one default canonical RocksDB.
+The installed app does not depend on the source checkout or its `node_modules`. Development and installed runtimes both use the same stable user-data home, so there is only one default canonical RocksDB. The installer also prepares and SHA-256 verifies a pinned `Xenova/all-MiniLM-L6-v2` q8 model before entering the downtime window; later upgrades reuse that verified local model without network access.
 
 After installation:
 

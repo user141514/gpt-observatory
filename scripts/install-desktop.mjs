@@ -34,6 +34,7 @@ const node = process.execPath
 const sourceStart = resolve(root, 'scripts', 'start-observatory.mjs')
 const sourceStop = resolve(root, 'scripts', 'stop-observatory.mjs')
 const sourceAgentInstall = resolve(root, 'scripts', 'install-agent-access.mjs')
+const sourceModelPrepare = resolve(root, 'scripts', 'prepare-embedding-model.mjs')
 const sourceIcon = resolve(root, 'public', 'gpt-observatory.ico')
 const sourceData = resolve(root, 'data', 'observatory')
 const sourceDist = resolve(root, 'dist')
@@ -56,6 +57,17 @@ await Promise.all([
   mkdir(launcherDir, { recursive: true }),
   mkdir(binDir, { recursive: true }),
 ])
+
+await runRequired(
+  node,
+  [sourceModelPrepare],
+  root,
+  'embedding model preparation',
+  {
+    ...process.env,
+    GPT_OBSERVATORY_HOME: installHome,
+  },
+)
 
 // PREPARE PHASE: the currently installed app stays online throughout this phase.
 for (const entry of await readdir(appDir, { withFileTypes: true })) {
@@ -152,6 +164,9 @@ const metadata = {
   buildCommit: gitRevision.status === 0 ? gitRevision.stdout.trim() : null,
   appDir: currentDir,
   dataDir: canonicalDataDir,
+  model: 'Xenova/all-MiniLM-L6-v2',
+  modelRevision: '751bff37182d3f1213fa05d7196b954e230abad9',
+  modelDtype: 'q8',
   node,
 }
 
@@ -314,8 +329,8 @@ function runCommand(command, args, cwd, env = process.env) {
   })
 }
 
-async function runRequired(command, args, cwd, label) {
-  const result = runCommand(command, args, cwd)
+async function runRequired(command, args, cwd, label, env = process.env) {
+  const result = runCommand(command, args, cwd, env)
   if (result.status !== 0) {
     throw new Error(`${label} failed: ${result.error ?? `exit ${result.status}`}`)
   }

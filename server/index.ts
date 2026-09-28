@@ -98,6 +98,7 @@ app.post('/api/observe', async (req, res, next) => {
   try {
     const input = observeSchema.parse(req.body)
     const result = await store.observe(input)
+    await semantic.indexEntity(result.entityId)
     res.status(201).json(result)
   } catch (error) {
     next(error)

@@ -248,11 +248,9 @@ function Timeline({ events }: { events: TimelineEvent[] }) {
                   </span>
                 )}
               </p>
-              {!event.initial && (
-                <div className="transition-note">
-                  {transitionSummary(event)}
-                </div>
-              )}
+              <div className="transition-note">
+                {transitionSummary(event)}
+              </div>
             </div>
           </article>
         ))}
@@ -875,6 +873,24 @@ function typeLabel(type: string): { zh: string; en: string } {
 function transitionSummary(event: TimelineEvent) {
   const field = fieldLabel(event.attribute).split(' / ')[0]
   const next = value(event.to)
+
+  if (event.initial) {
+    const initialTemplates: Record<string, string> = {
+      phase: `「${event.entityLabel}」当前工作阶段记录为「${next}」。`,
+      status: `「${event.entityLabel}」当前状态记录为「${next}」。`,
+      canonical_db: `「${event.entityLabel}」当前使用的事实库为「${next}」。`,
+      ui: `「${event.entityLabel}」当前采用「${next}」界面方案。`,
+      graph_ui: `「${event.entityLabel}」当前图谱呈现为「${next}」。`,
+      agent_cli: `「${event.entityLabel}」的智能体 CLI 状态记录为「${next}」。`,
+      agent_mcp: `「${event.entityLabel}」的智能体 MCP 状态记录为「${next}」。`,
+      orca_access: `「${event.entityLabel}」的 Orca 接入状态记录为「${next}」。`,
+      global_skill: `「${event.entityLabel}」的全局技能状态记录为「${next}」。`,
+      bilingual_ui: `「${event.entityLabel}」当前界面语言配置为「${next}」。`,
+      typography: `「${event.entityLabel}」当前字体层级方案为「${next}」。`,
+    }
+    return initialTemplates[event.attribute]
+      ?? `「${event.entityLabel}」的${field}记录为「${next}」。`
+  }
 
   const previous = value(event.from)
   const templates: Record<string, string> = {

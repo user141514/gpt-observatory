@@ -35,6 +35,14 @@ export interface RelationInput {
   rawPayload?: unknown
 }
 
+export interface ClearFactInput {
+  source: SourceInput
+  entity: EntityInput
+  attribute: string
+  observedAt?: string
+  rawPayload?: unknown
+}
+
 export interface ClearRelationInput {
   source: SourceInput
   from: EntityInput
@@ -294,6 +302,63 @@ export function createStore(db: ObservatoryDb) {
     return { observationId: idString(observationId), relationChanged: true }
   }
 
+  async function clearFact(input: ClearFactInput): Promise<{
+    observationId: string
+    factsClosed: number
+  }> {
+    const sourceId = await ensureSource(input.source)
+    const entityId = await ensureEntity(input.entity)
+    const observedAt = input.observedAt ? new Date(input.observedAt) : new Date()
+    const observationId = new RecordId('observation', randomUUID())
+
+    await db.query(
+      `CREATE $id SET
+        source = $source,
+        entity = $entity,
+        observed_at = $observed_at,
+        recorded_at = time::now(),
+        coverage = [$coverage],
+        snapshot_hash = $snapshot_hash,
+        raw_payload = $raw_payload,
+        status = "ok"`,
+      {
+        id: observationId,
+        source: sourceId,
+        entity: entityId,
+        observed_at: observedAt,
+        coverage: input.attribute,
+        snapshot_hash: hashCanonical({ attribute: input.attribute, cleared: true }),
+        raw_payload: input.rawPayload ?? {
+          attribute: input.attribute,
+          entity: input.entity.stableKey,
+          cleared: true,
+        },
+      },
+    )
+
+    const current = rows(
+      await db.query(
+        `SELECT * FROM fact
+         WHERE entity = $entity
+           AND attribute = $attribute
+           AND valid_to IS NONE`,
+        { entity: entityId, attribute: input.attribute },
+      ),
+    )
+
+    for (const fact of current) {
+      await db.query('UPDATE $id SET valid_to = $valid_to', {
+        id: fact.id,
+        valid_to: observedAt,
+      })
+    }
+
+    return {
+      observationId: idString(observationId),
+      factsClosed: current.length,
+    }
+  }
+
   async function clearRelation(input: ClearRelationInput): Promise<{
     observationId: string
     relationsClosed: number
@@ -353,7 +418,9 @@ export function createStore(db: ObservatoryDb) {
 
   async function currentEntities(): Promise<CurrentEntity[]> {
     const entityRows = rows(
-      await db.query('SELECT * FROM entity WHERE type != "browser_tab" ORDER BY type, label'),
+      await db.query(
+        'SELECT * FROM entity WHERE type NOT IN ["browser_tab", "supervised_task"] ORDER BY type, label',
+      ),
     )
     const factRows = rows(
       await db.query(
@@ -417,7 +484,7 @@ export function createStore(db: ObservatoryDb) {
         const fact = group[i]
         const previous = i > 0 ? group[i - 1] : undefined
         const entity = entities.get(idString(fact.entity))
-        if (entity?.type === 'browser_tab') continue
+        if (entity?.type === 'browser_tab' || entity?.type === 'supervised_task') continue
         events.push({
           id: idString(fact.id),
           entityId: idString(fact.entity),
@@ -531,6 +598,7 @@ export function createStore(db: ObservatoryDb) {
     ensureEntity,
     observe,
     setRelation,
+    clearFact,
     clearRelation,
     currentEntities,
     timeline,

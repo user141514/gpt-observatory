@@ -147,30 +147,37 @@ test('watchdog bridge preserves canonical task identity and keeps tabs runtime-o
       'retiring the legacy task must not unbind the conversation still used by the canonical task',
     )
 
-    const legacyTask = entities.find(
-      entity => entity.stableKey === 'supervised-task:task-alpha',
+    assert.equal(
+      entities.some(entity => entity.type === 'supervised_task'),
+      false,
+      'legacy supervised-task entities must not remain in current projections',
     )
-    assert.equal(legacyTask?.currentFacts.watchdog_registered, false)
     assert.equal(
       entities.some(entity => entity.type === 'browser_tab'),
       false,
-      'browser tabs are runtime bindings and must never become durable entities',
+      'browser tabs are runtime bindings and must never appear in durable projections',
+    )
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(
+        currentConversationA?.currentFacts ?? {},
+        'tab_bound',
+      ),
+      false,
+      'legacy tab_bound fact must be closed during migration',
     )
 
     let graph = await store.graph()
     assert.equal(
-      graph.edges.some(edge => edge.predicate === 'RENDERED_IN'),
-      false,
-      'browser tab bindings must never enter the durable factual graph',
-    )
-    assert.equal(
-      graph.edges.some(
-        edge =>
-          edge.source === legacyTask?.id
-          && edge.predicate === 'RUNS_IN',
+      graph.nodes.some(
+        node => node.type === 'browser_tab' || node.type === 'supervised_task',
       ),
       false,
-      'legacy supervised-task relations must be retired during migration',
+      'legacy runtime-only and duplicate-task nodes must be hidden from the current graph',
+    )
+    assert.equal(
+      graph.edges.some(edge => edge.predicate === 'RENDERED_IN'),
+      false,
+      'browser tab bindings must never enter the current factual graph',
     )
 
     const relayFailingFetch: typeof fetch = async input => {

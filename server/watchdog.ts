@@ -97,6 +97,12 @@ const WATCHDOG_SOURCE: SourceInput = {
   authorityScope: 'supervised task membership, task-conversation binding, and watchdog runtime state',
 }
 
+const MIGRATION_SOURCE: SourceInput = {
+  key: 'observatory-migration',
+  type: 'system_migration',
+  authorityScope: 'retiring invalid legacy projection artifacts',
+}
+
 const WATCHDOG_ENTITY: EntityInput = {
   stableKey: 'service:watchdog',
   type: 'service',
@@ -189,6 +195,23 @@ export function createWatchdogBridge(
       )
       const views: SupervisedTaskView[] = []
 
+      const legacyTabFactConversations = existing.filter(
+        entity =>
+          entity.type === 'conversation'
+          && Object.prototype.hasOwnProperty.call(entity.currentFacts, 'tab_bound'),
+      )
+      for (const conversation of legacyTabFactConversations) {
+        await store.clearFact({
+          source: MIGRATION_SOURCE,
+          entity: entityInputFromCurrent(conversation),
+          attribute: 'tab_bound',
+          observedAt,
+          rawPayload: {
+            reason: 'legacy durable tab-bound fact retired; tabs are runtime-only',
+          },
+        })
+      }
+
       const existingGraph = await store.graph()
       const legacyRenderedConversationIds = new Set(
         existingGraph.edges
@@ -205,7 +228,7 @@ export function createWatchdogBridge(
       )
       for (const conversationId of legacyRenderedConversationIds) {
         await store.clearRelation({
-          source: WATCHDOG_SOURCE,
+          source: MIGRATION_SOURCE,
           from: conversationEntityFor(conversationId),
           predicate: 'RENDERED_IN',
           observedAt,

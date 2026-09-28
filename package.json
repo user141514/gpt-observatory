@@ -1,0 +1,40 @@
+{
+  "name": "gpt-observatory",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n api,web \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:web": "vite",
+    "dev:server": "tsx watch server/index.ts",
+    "start:server": "tsx server/index.ts",
+    "export:obsidian": "tsx server/export-obsidian.ts",
+    "test": "tsx --test --test-force-exit server/*.test.ts",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.3.0",
+    "@surrealdb/node": "^3.0.3",
+    "cytoscape": "^3.34.3",
+    "express": "^5.2.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "surrealdb": "^2.0.8",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/cytoscape": "^3.21.9",
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "concurrently": "^10.0.5",
+    "oxlint": "^1.81.0",
+    "tsx": "^4.23.15",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0"
+  }
+}

@@ -1,0 +1,17 @@
+import type { GraphResponse, NowResponse, SearchResult, TimelineEvent } from './types'
+
+async function getJson<T>(url: string): Promise<T> {
+  const response = await fetch(url)
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
+  return response.json() as Promise<T>
+}
+
+export const api = {
+  now: () => getJson<NowResponse>('/api/now'),
+  timeline: () => getJson<{ events: TimelineEvent[] }>('/api/timeline'),
+  graph: () => getJson<GraphResponse>('/api/graph'),
+  search: (query: string) =>
+    getJson<{ query: string; results: SearchResult[] }>(
+      `/api/search?q=${encodeURIComponent(query)}`,
+    ),
+}

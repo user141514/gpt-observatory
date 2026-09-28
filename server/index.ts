@@ -1,0 +1,130 @@
+import express from 'express'
+import { z } from 'zod'
+import { createDatabase } from './db.js'
+import { createSemanticIndex } from './semantic.js'
+import { createStore } from './store.js'
+
+const app = express()
+app.use(express.json({ limit: '2mb' }))
+
+const db = await createDatabase()
+const store = createStore(db)
+const semantic = createSemanticIndex(db, store)
+
+const sourceSchema = z.object({
+  key: z.string().min(1),
+  type: z.string().min(1),
+  authorityScope: z.string().optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+})
+
+const entitySchema = z.object({
+  stableKey: z.string().min(1),
+  type: z.string().min(1),
+  label: z.string().optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+})
+
+const observeSchema = z.object({
+  source: sourceSchema,
+  entity: entitySchema,
+  observedAt: z.string().datetime().optional(),
+  coverage: z.array(z.string()).min(1),
+  facts: z.record(z.string(), z.unknown()),
+  rawPayload: z.unknown().optional(),
+  status: z.enum(['ok', 'partial', 'error']).optional(),
+})
+
+const relationSchema = z.object({
+  source: sourceSchema,
+  from: entitySchema,
+  predicate: z.string().min(1),
+  to: entitySchema,
+  observedAt: z.string().datetime().optional(),
+  rawPayload: z.unknown().optional(),
+})
+
+app.get('/api/health', async (_req, res) => {
+  res.json({ ok: true, counts: await store.counts() })
+})
+
+app.get('/api/now', async (_req, res) => {
+  res.json({
+    counts: await store.counts(),
+    entities: await store.currentEntities(),
+  })
+})
+
+app.get('/api/timeline', async (_req, res) => {
+  res.json({ events: await store.timeline() })
+})
+
+app.get('/api/graph', async (_req, res) => {
+  res.json(await store.graph())
+})
+
+app.get('/api/search', async (req, res, next) => {
+  try {
+    const query = z.string().min(1).parse(req.query.q)
+    res.json({ query, results: await semantic.search(query) })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/observe', async (req, res, next) => {
+  try {
+    const input = observeSchema.parse(req.body)
+    const result = await store.observe(input)
+    res.status(201).json(result)
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/relations', async (req, res, next) => {
+  try {
+    const input = relationSchema.parse(req.body)
+    const result = await store.setRelation(input)
+    res.status(201).json(result)
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/semantic/reindex', async (_req, res, next) => {
+  try {
+    res.json(await semantic.reindexAll())
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error(error)
+  if (error instanceof z.ZodError) {
+    res.status(400).json({ error: 'invalid_request', details: error.issues })
+    return
+  }
+  res.status(500).json({
+    error: 'internal_error',
+    message: error instanceof Error ? error.message : String(error),
+  })
+})
+
+const port = Number(process.env.OBSERVATORY_PORT ?? 4317)
+const server = app.listen(port, '127.0.0.1', () => {
+  console.log(`GPT Observatory API listening on http://127.0.0.1:${port}`)
+})
+
+async function shutdown() {
+  server.close()
+  await db.close()
+}
+
+process.on('SIGINT', () => {
+  void shutdown().finally(() => process.exit(0))
+})
+process.on('SIGTERM', () => {
+  void shutdown().finally(() => process.exit(0))
+})

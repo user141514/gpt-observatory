@@ -1,1 +1,210 @@
-:root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#172033;background:#f7f8fa;font-synthesis:none;text-rendering:optimizeLegibility;--bg:#f7f8fa;--panel:#fff;--text:#172033;--muted:#697386;--border:#dce1e8;--soft:#edf0f4;--mono:"SFMono-Regular",Consolas,"Liberation Mono",monospace}*{box-sizing:border-box}body{margin:0;min-width:320px;min-height:100vh;background:var(--bg);color:var(--text)}button,input{font:inherit}button:focus-visible,input:focus-visible{outline:2px solid #334155;outline-offset:2px}@media(prefers-color-scheme:dark){:root{--bg:#111318;--panel:#171a21;--text:#eef2f7;--muted:#9ca6b6;--border:#2b313c;--soft:#232934}}
+:root {
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  color: #172033;
+  background: #eef2f5;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+
+  --bg: #eef2f5;
+  --panel: rgba(251, 252, 253, 0.70);
+  --panel-strong: rgba(252, 253, 254, 0.79);
+  --text: #1d2738;
+  --muted: #6c7889;
+  --muted-soft: #94a0af;
+  --border: rgba(111, 126, 147, 0.18);
+  --border-soft: rgba(111, 126, 147, 0.105);
+  --code-bg: rgba(246, 248, 250, 0.68);
+  --shadow-sm: 0 7px 20px rgba(48, 63, 85, 0.055);
+  --shadow-md: 0 12px 32px rgba(48, 63, 85, 0.075);
+  --shadow-lg: 0 24px 64px rgba(48, 63, 85, 0.10);
+  --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  color: var(--text);
+  background:
+    radial-gradient(circle at 10% 12%, rgba(177, 205, 218, 0.34), transparent 27%),
+    radial-gradient(circle at 82% 14%, rgba(202, 194, 218, 0.28), transparent 25%),
+    radial-gradient(circle at 72% 74%, rgba(189, 214, 204, 0.28), transparent 29%),
+    radial-gradient(circle at 20% 82%, rgba(218, 203, 195, 0.22), transparent 25%),
+    linear-gradient(135deg, #edf2f5 0%, #f4f5f6 46%, #eef1f4 100%);
+  overflow-x: hidden;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.22;
+  background-image:
+    linear-gradient(30deg, rgba(118, 137, 158, 0.08) 12%, transparent 12.5%, transparent 87%, rgba(118, 137, 158, 0.08) 87.5%),
+    linear-gradient(150deg, rgba(118, 137, 158, 0.06) 12%, transparent 12.5%, transparent 87%, rgba(118, 137, 158, 0.06) 87.5%),
+    linear-gradient(30deg, rgba(255, 255, 255, 0.22) 12%, transparent 12.5%, transparent 87%, rgba(255, 255, 255, 0.22) 87.5%);
+  background-size: 176px 308px;
+  background-position: 0 0, 0 0, 88px 154px;
+  mix-blend-mode: soft-light;
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.075;
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(48, 63, 85, 0.5) 0.55px, transparent 0.7px);
+  background-size: 5px 5px;
+}
+
+.ambient-layer {
+  position: fixed;
+  inset: -14%;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.55;
+  background:
+    radial-gradient(circle at 22% 28%, rgba(149, 188, 209, 0.16), transparent 22%),
+    radial-gradient(circle at 74% 20%, rgba(186, 167, 205, 0.13), transparent 21%),
+    radial-gradient(circle at 64% 72%, rgba(156, 200, 185, 0.12), transparent 23%),
+    radial-gradient(circle at 28% 78%, rgba(211, 177, 166, 0.10), transparent 18%);
+  filter: blur(24px);
+  animation: ambient-drift 24s ease-in-out infinite alternate;
+}
+
+.noise-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.04;
+  background:
+    repeating-radial-gradient(circle at 0 0, rgba(36, 49, 67, 0.28) 0 0.45px, transparent 0.7px 3px);
+  background-size: 9px 9px;
+  mix-blend-mode: multiply;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid rgba(74, 95, 126, 0.5);
+  outline-offset: 2px;
+}
+
+::selection {
+  color: #172033;
+  background: rgba(180, 200, 222, 0.58);
+}
+
+@keyframes ambient-drift {
+  0% {
+    transform: translate3d(-1.2%, -0.5%, 0) scale(1);
+  }
+
+  50% {
+    transform: translate3d(1%, 0.8%, 0) scale(1.015);
+  }
+
+  100% {
+    transform: translate3d(0.2%, -0.3%, 0) scale(1.005);
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #10151c;
+    --panel: rgba(19, 25, 34, 0.72);
+    --panel-strong: rgba(17, 23, 32, 0.82);
+    --text: #edf2f7;
+    --muted: #9aa7b7;
+    --muted-soft: #748294;
+    --border: rgba(154, 173, 198, 0.15);
+    --border-soft: rgba(154, 173, 198, 0.085);
+    --code-bg: rgba(10, 15, 22, 0.42);
+    --shadow-sm: 0 8px 20px rgba(0, 0, 0, 0.15);
+    --shadow-md: 0 14px 36px rgba(0, 0, 0, 0.21);
+    --shadow-lg: 0 28px 70px rgba(0, 0, 0, 0.28);
+  }
+
+  body {
+    background:
+      radial-gradient(circle at 10% 12%, rgba(68, 105, 124, 0.23), transparent 27%),
+      radial-gradient(circle at 82% 14%, rgba(91, 74, 112, 0.22), transparent 25%),
+      radial-gradient(circle at 72% 74%, rgba(65, 107, 93, 0.19), transparent 29%),
+      radial-gradient(circle at 20% 82%, rgba(110, 81, 71, 0.16), transparent 25%),
+      linear-gradient(135deg, #0f151c 0%, #141922 46%, #10161e 100%);
+  }
+
+  body::before {
+    opacity: 0.10;
+  }
+
+  body::after {
+    opacity: 0.045;
+  }
+
+  .ambient-layer {
+    opacity: 0.42;
+  }
+
+  .noise-layer {
+    opacity: 0.025;
+    mix-blend-mode: screen;
+  }
+
+  .system-state,
+  .refresh-button,
+  .view-tab,
+  .search-input-wrap {
+    background: rgba(20, 27, 37, 0.44);
+  }
+
+  .view-tab.active {
+    background: rgba(218, 226, 237, 0.92);
+    color: #182231;
+    border-color: rgba(218, 226, 237, 0.88);
+  }
+
+  .view-tab.active small {
+    color: rgba(24, 34, 49, 0.58);
+  }
+
+  .graph {
+    background:
+      linear-gradient(rgba(16, 22, 30, 0.58), rgba(16, 22, 30, 0.52)),
+      repeating-linear-gradient(0deg, transparent 0 31px, rgba(160, 178, 202, 0.035) 31px 32px),
+      repeating-linear-gradient(90deg, transparent 0 31px, rgba(160, 178, 202, 0.035) 31px 32px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ambient-layer {
+    animation: none;
+  }
+}

@@ -22,6 +22,31 @@ npm run dev:web -- --host 127.0.0.1 --port 4318
 
 The API defaults to `http://127.0.0.1:4317` and the Vite development UI to `http://127.0.0.1:4318`.
 
+## Agent access
+
+Any shell-capable local agent can use the stable CLI from any working directory after the user-level launcher is installed:
+
+```bash
+gpt-observatory context --recent 20
+gpt-observatory now
+gpt-observatory timeline
+gpt-observatory graph
+gpt-observatory search "semantic query"
+```
+
+MCP-capable clients can launch the stdio adapter with `gpt-observatory-mcp`. The MCP surface exposes:
+
+- `observatory_context`
+- `observatory_now`
+- `observatory_timeline`
+- `observatory_graph`
+- `observatory_search`
+- `observatory_observe`
+- `observatory_relate`
+- `observatory_reindex`
+
+Both adapters call the canonical HTTP API; neither opens RocksDB as another owner.
+
 ## Validate
 
 ```bash
@@ -29,6 +54,7 @@ npm run lint
 npm test
 npm run build
 npm run export:obsidian
+npm run agent -- context --recent 5
 ```
 
 The Obsidian export reads the canonical API rather than opening the embedded database as a second owner.

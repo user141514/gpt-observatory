@@ -238,6 +238,9 @@ function Timeline({ events }: { events: TimelineEvent[] }) {
                 <span className="arrow">→</span>
                 <code>{value(event.to)}</code>
               </p>
+              <div className="transition-note">
+                {transitionSummary(event)}
+              </div>
             </div>
           </article>
         ))}
@@ -855,6 +858,30 @@ function typeLabel(type: string): { zh: string; en: string } {
     artifact: { zh: '产物', en: 'Artifact' },
   }
   return labels[type] ?? { zh: type, en: type }
+}
+
+function transitionSummary(event: TimelineEvent) {
+  const field = fieldLabel(event.attribute).split(' / ')[0]
+  const next = value(event.to)
+
+  if (event.initial) {
+    return `首次观测到「${event.entityLabel}」的${field}为「${next}」。`
+  }
+
+  const previous = value(event.from)
+  const templates: Record<string, string> = {
+    phase: `「${event.entityLabel}」的工作阶段从「${previous}」推进到「${next}」。`,
+    status: `「${event.entityLabel}」的状态从「${previous}」更新为「${next}」。`,
+    canonical_db: `「${event.entityLabel}」使用的事实库从「${previous}」切换为「${next}」。`,
+    ui: `「${event.entityLabel}」的界面方案从「${previous}」调整为「${next}」。`,
+    graph_ui: `「${event.entityLabel}」的图谱呈现从「${previous}」调整为「${next}」。`,
+    agent_cli: `「${event.entityLabel}」的智能体 CLI 状态从「${previous}」更新为「${next}」。`,
+    agent_mcp: `「${event.entityLabel}」的智能体 MCP 状态从「${previous}」更新为「${next}」。`,
+    orca_access: `「${event.entityLabel}」的 Orca 接入状态从「${previous}」更新为「${next}」。`,
+  }
+
+  return templates[event.attribute]
+    ?? `「${event.entityLabel}」的${field}从「${previous}」变化为「${next}」。`
 }
 
 function fieldLabel(key: string) {

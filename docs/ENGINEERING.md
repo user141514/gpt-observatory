@@ -29,6 +29,8 @@ Neither embeddings, graph visualisation, nor Obsidian notes may overwrite canoni
 
 A projection may lag or be deleted without changing factual truth. The canonical state is valid iff every displayed current value can be traced to an observation, and absence of an observation is never rendered as "unchanged".
 
+Canonical acceptance is never revoked by a rebuildable projection failure. In particular, once an observation/fact write succeeds, semantic indexing may report a degraded projection warning, but must not cause the API to return a canonical-write failure or invite the caller to retry the authoritative write.
+
 Counterexample: two successful polls report `status=running`. This is two observations but one open fact interval. If the second poll creates another fact, TIMELINE fabricates a transition that did not happen.
 
 ## Supervision identity contract

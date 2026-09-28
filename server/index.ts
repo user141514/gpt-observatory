@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import express from 'express'
 import { z } from 'zod'
 import { createDatabase } from './db.js'
+import { observeWithSemanticProjection } from './observe-service.js'
 import { createSemanticIndex } from './semantic.js'
 import { createStore } from './store.js'
 import { createWatchdogBridge } from './watchdog.js'
@@ -97,8 +98,17 @@ app.get('/api/search', async (req, res, next) => {
 app.post('/api/observe', async (req, res, next) => {
   try {
     const input = observeSchema.parse(req.body)
-    const result = await store.observe(input)
-    await semantic.indexEntity(result.entityId)
+    const result = await observeWithSemanticProjection(
+      store,
+      semantic,
+      input,
+      error => {
+        console.error(
+          'Semantic projection failed after canonical observation was accepted.',
+          error,
+        )
+      },
+    )
     res.status(201).json(result)
   } catch (error) {
     next(error)

@@ -138,6 +138,26 @@ MCP-capable clients can launch the stdio adapter with `gpt-observatory-mcp`. The
 
 Both adapters call the canonical HTTP API; neither opens RocksDB as another owner. Adaptive task prompts are also not owned by Observatory: prompt reads/writes are proxied to Watchdog protocol v4, where `expectedVersion` provides CAS protection. Observatory only projects the resulting prompt state into factual history and disables prompt editing when the connected Watchdog does not advertise protocol v4.
 
+### Adaptive prompt loop
+
+For one Watchdog-supervised task, the intended agent loop is:
+
+```text
+read task + prompt version
+→ execute one observable step
+→ inspect the real result
+→ decide the next smallest useful step
+→ CAS-update that next-step prompt
+→ end the current turn
+→ Watchdog uses the new prompt on the next continuation tick
+```
+
+The adaptive body is deliberately weaker than the Watchdog envelope. The base task identity, `SUPERVISOR_DONE` gate, `[SUPERVISOR_STATE: NEED_INPUT]` gate and completion semantics are rendered by Watchdog and cannot be replaced from the UI, CLI or MCP.
+
+If a prompt update returns HTTP 409 / `prompt_version_conflict`, re-read the task prompt and reconcile the newer version before deciding whether another update is still appropriate. Never blindly retry a stale write.
+
+If the task is complete, do not invent another continuation step. If human input is required, do not write a next-step prompt that assumes the input already happened.
+
 ## Validate
 
 ```bash

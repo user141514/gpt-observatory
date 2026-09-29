@@ -122,6 +122,43 @@ Use \`gpt-observatory observe\` only for directly observed or explicitly sourced
 Use \`gpt-observatory relate\` only for factual relations with a real source.
 Do not store speculative causal claims as facts.
 
+## Adaptive supervised-task prompt loop
+
+Watchdog owns supervised-task prompt state. Observatory only proxies it.
+
+When working on a Watchdog-supervised task:
+
+1. Read the current task and prompt state before changing it:
+   \`\`\`bash
+   gpt-observatory tasks
+   gpt-observatory prompt-get <task-id>
+   \`\`\`
+2. Execute exactly one useful, observable step.
+3. Observe the real result and decide the next smallest useful step.
+4. Before ending the turn, CAS-update the task prompt using the version you actually read:
+   \`\`\`bash
+   gpt-observatory prompt-set <task-id> \\
+     --expected-version <current-version> \\
+     --step-index <next-step-index> \\
+     --prompt "<next smallest useful step>" \\
+     --updated-by <agent-id>
+   \`\`\`
+5. End the current turn. The next Watchdog continuation uses the new prompt automatically.
+
+Rules:
+- Never rewrite or reproduce the Watchdog base envelope. It is immutable and Watchdog adds it at send time.
+- Never remove or override the \`SUPERVISOR_DONE\` or \`[SUPERVISOR_STATE: NEED_INPUT]\` gates.
+- A prompt update is task-scoped and survives conversation rebinds.
+- On HTTP 409 / \`prompt_version_conflict\`, do not retry blindly. Re-read the prompt, reconcile the newer step, then issue a new CAS update only if still appropriate.
+- If the task is truly complete, do not invent another step. Finish normally and let the immutable completion gate terminate the loop.
+- If user/manual input is required, do not write a prompt that assumes the input already happened.
+- Prompt state controls continuation only. Durable results still belong in canonical observations/relations when they are worth retaining.
+
+For MCP-capable agents, use:
+- \`observatory_supervised_tasks\`
+- \`observatory_task_prompt_get\`
+- \`observatory_task_prompt_update\`
+
 ## MCP
 
 Shell-backed clients can run:
@@ -143,6 +180,9 @@ Tools:
 - observatory_now
 - observatory_timeline
 - observatory_graph
+- observatory_supervised_tasks
+- observatory_task_prompt_get
+- observatory_task_prompt_update
 - observatory_search
 - observatory_observe
 - observatory_relate

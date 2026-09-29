@@ -48,6 +48,7 @@ import type {
   SearchResult,
   SupervisedTask,
   SupervisedTasksResponse,
+  TaskPromptState,
   TimelineEvent,
 } from './types'
 import './App.css'
@@ -407,26 +408,35 @@ function SupervisedTaskCard({
         </div>
       )}
 
-      <TaskPromptEditor
-        key={`${task.taskId}:${task.prompt.version}`}
-        task={task}
-        writable={promptWritable}
-        onSaved={onPromptSaved}
-      />
+      {task.prompt ? (
+        <TaskPromptEditor
+          key={`${task.taskId}:${task.prompt.version}`}
+          task={task}
+          prompt={task.prompt}
+          writable={promptWritable}
+          onSaved={onPromptSaved}
+        />
+      ) : (
+        <div className="prompt-feedback degraded">
+          当前 Watchdog 没有提供可信的 protocol-v4 prompt state；不会显示或编辑伪造的默认版本。
+        </div>
+      )}
     </article>
   )
 }
 
 function TaskPromptEditor({
   task,
+  prompt,
   writable,
   onSaved,
 }: {
   task: SupervisedTask
+  prompt: TaskPromptState
   writable: boolean
   onSaved: () => Promise<void>
 }) {
-  const [stepIndex, setStepIndex] = useState(task.prompt.stepIndex + 1)
+  const [stepIndex, setStepIndex] = useState(prompt.stepIndex + 1)
   const [stepPrompt, setStepPrompt] = useState('')
   const [saving, setSaving] = useState(false)
   const [previewing, setPreviewing] = useState(false)
@@ -439,7 +449,7 @@ function TaskPromptEditor({
     setFeedback('')
     try {
       await api.updateTaskPrompt(task.taskId, {
-        expectedVersion: task.prompt.version,
+        expectedVersion: prompt.version,
         stepIndex,
         stepPrompt: value,
         updatedBy: 'observatory-ui',
@@ -489,7 +499,7 @@ function TaskPromptEditor({
           <strong>自适应继续提示词</strong>
           <small>ADAPTIVE CONTINUATION PROMPT</small>
         </span>
-        <code>v{task.prompt.version} · step {task.prompt.stepIndex}</code>
+        <code>v{prompt.version} · step {prompt.stepIndex}</code>
       </summary>
 
       <div className="task-prompt-body">
@@ -507,16 +517,16 @@ function TaskPromptEditor({
         <div className="current-prompt-block">
           <div className="prompt-block-head">
             <span>当前步骤提示词 <small>CURRENT ADAPTIVE STEP</small></span>
-            <code>v{task.prompt.version}</code>
+            <code>v{prompt.version}</code>
           </div>
           <p>
-            {task.prompt.stepPrompt
+            {prompt.stepPrompt
               ?? '当前没有自适应内容；Watchdog 只使用基础继续 envelope。'}
           </p>
           <div className="prompt-meta-row">
-            <span>step {task.prompt.stepIndex}</span>
-            <span>{task.prompt.updatedBy ?? 'system/default'}</span>
-            <span>{task.prompt.updatedAt ? dateTime(task.prompt.updatedAt) : '未单独更新'}</span>
+            <span>step {prompt.stepIndex}</span>
+            <span>{prompt.updatedBy ?? 'system/default'}</span>
+            <span>{prompt.updatedAt ? dateTime(prompt.updatedAt) : '未单独更新'}</span>
           </div>
         </div>
 

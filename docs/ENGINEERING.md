@@ -92,7 +92,9 @@ Core invariant:
 
 Watchdog Registry is the sole authority for each supervised Task's continuation prompt state. The state is keyed by `task_id`, versioned with CAS (`expected_version`), persisted in the Watchdog registry, and therefore survives daemon restart and conversation rebind. Watchdog—not Observatory, UI, or an agent—renders the immutable supervision envelope containing task identity, prompt version, `SUPERVISOR_DONE`, and `NEED_INPUT`; callers may only replace the adaptive step body and step index.
 
-Prompt update and continuation send share the same per-task execution fence: after an update returns success, no continuation using the replaced prompt generation may still be in flight. Protocol-v4 watchers must support prompt injection or fail closed. Observatory is only a proxy/projection: it exposes UI/CLI/MCP access, records observed prompt facts, and disables/rejects prompt operations against pre-v4 Watchdog rather than fabricating version-zero state.
+Each continuation tick snapshots exactly one prompt generation before transport work. A CAS prompt update commits immediately under the Watchdog Registry authority and does not wait for an already-running tick; that tick may finish with its existing snapshot, while the next eligible tick must use the new version. Protocol-v4 watchers must support prompt injection or fail closed. Observatory is only a proxy/projection: it exposes UI/CLI/MCP access, records observed prompt facts, and disables/rejects prompt operations against pre-v4 Watchdog rather than fabricating version-zero state.
+
+Protocol v4 is fail-closed: a missing prompt payload, task-identity mismatch, or invalid prompt version/step schema invalidates that Watchdog projection instead of being normalized into a plausible default. The `watchdog_prompt_*` fact namespace is Watchdog-owned; generic `/api/observe` and `observatory_observe` callers are forbidden from writing or covering those attributes, so they cannot create, overwrite, or close authoritative prompt fact intervals.
 
 Recommended agent loop after each verified step:
 1. read the current Task prompt state;

@@ -105,7 +105,7 @@ export interface SupervisedTask {
   lastSuccessAt?: string
   consecutiveFailures: number
   lastError?: string
-  prompt: TaskPromptState
+  prompt?: TaskPromptState
 }
 
 export interface SupervisedTasksResponse {

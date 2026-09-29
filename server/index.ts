@@ -4,7 +4,10 @@ import { fileURLToPath } from 'node:url'
 import express from 'express'
 import { z } from 'zod'
 import { createDatabase } from './db.js'
-import { observeWithSemanticProjection } from './observe-service.js'
+import {
+  ObservationAuthorityError,
+  observeExternalWithSemanticProjection,
+} from './observe-service.js'
 import { createSemanticIndex } from './semantic.js'
 import { createStore } from './store.js'
 import {
@@ -133,7 +136,7 @@ app.get('/api/search', async (req, res, next) => {
 app.post('/api/observe', async (req, res, next) => {
   try {
     const input = observeSchema.parse(req.body)
-    const result = await observeWithSemanticProjection(
+    const result = await observeExternalWithSemanticProjection(
       store,
       semantic,
       input,
@@ -212,6 +215,14 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
   console.error(error)
   if (error instanceof z.ZodError) {
     res.status(400).json({ error: 'invalid_request', details: error.issues })
+    return
+  }
+  if (error instanceof ObservationAuthorityError) {
+    res.status(400).json({
+      error: 'reserved_fact_authority',
+      message: error.message,
+      attributes: error.attributes,
+    })
     return
   }
   res.status(500).json({

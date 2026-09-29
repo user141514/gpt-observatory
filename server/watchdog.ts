@@ -107,7 +107,7 @@ export interface SupervisedTaskView {
   lastSuccessAt?: string
   consecutiveFailures: number
   lastError?: string
-  prompt: TaskPromptState
+  prompt?: TaskPromptState
 }
 
 export interface SupervisedTasksProjection {
@@ -324,7 +324,9 @@ export function createWatchdogBridge(
           && watch.connected
           && !watch.last_error
           && watch.last_success_at != null
-        const prompt = normalizePrompt(watch.prompt, taskId)
+        const prompt = promptAvailable
+          ? normalizePrompt(watch.prompt, taskId)
+          : undefined
         const taskCoverage = [
           'watchdog_registered',
           'watchdog_state',
@@ -353,7 +355,7 @@ export function createWatchdogBridge(
           binding_changed_at: epochSecondsIso(watch.binding_changed_at),
           task_identity_source: identitySource,
         }
-        if (promptAvailable && watch.prompt) {
+        if (prompt) {
           taskCoverage.push(
             'watchdog_prompt_version',
             'watchdog_prompt_step_index',
@@ -672,27 +674,105 @@ function normalizePrompt(
   raw: WatchdogPromptState | null | undefined,
   taskId: string,
 ): TaskPromptState {
+  if (!raw || typeof raw !== 'object') {
+    throw new Error(`invalid watchdog prompt for ${taskId}: payload is required`)
+  }
+
+  const promptTaskId =
+    typeof raw.task_id === 'string' ? raw.task_id.trim() : ''
+  if (!promptTaskId || promptTaskId !== taskId) {
+    throw new Error(
+      `invalid watchdog prompt for ${taskId}: task_id mismatch`,
+    )
+  }
+
+  if (
+    typeof raw.version !== 'number'
+    || !Number.isInteger(raw.version)
+    || raw.version < 0
+  ) {
+    throw new Error(
+      `invalid watchdog prompt for ${taskId}: version must be a non-negative integer`,
+    )
+  }
+
+  if (
+    typeof raw.step_index !== 'number'
+    || !Number.isInteger(raw.step_index)
+    || raw.step_index < 0
+  ) {
+    throw new Error(
+      `invalid watchdog prompt for ${taskId}: step_index must be a non-negative integer`,
+    )
+  }
+
+  if (
+    raw.step_prompt !== undefined
+    && raw.step_prompt !== null
+    && typeof raw.step_prompt !== 'string'
+  ) {
+    throw new Error(
+      `invalid watchdog prompt for ${taskId}: step_prompt must be a string or null`,
+    )
+  }
+  if (
+    typeof raw.step_prompt === 'string'
+    && raw.step_prompt.length > 12000
+  ) {
+    throw new Error(
+      `invalid watchdog prompt for ${taskId}: step_prompt exceeds 12000 characters`,
+    )
+  }
+
+  if (
+    raw.updated_at !== undefined
+    && raw.updated_at !== null
+    && (
+      typeof raw.updated_at !== 'number'
+      || !Number.isFinite(raw.updated_at)
+      || raw.updated_at < 0
+    )
+  ) {
+    throw new Error(
+      `invalid watchdog prompt for ${taskId}: updated_at must be a non-negative finite number or null`,
+    )
+  }
+
+  if (
+    raw.updated_by !== undefined
+    && raw.updated_by !== null
+    && typeof raw.updated_by !== 'string'
+  ) {
+    throw new Error(
+      `invalid watchdog prompt for ${taskId}: updated_by must be a string or null`,
+    )
+  }
+
+  if (
+    raw.rendered_prompt !== undefined
+    && raw.rendered_prompt !== null
+    && typeof raw.rendered_prompt !== 'string'
+  ) {
+    throw new Error(
+      `invalid watchdog prompt for ${taskId}: rendered_prompt must be a string`,
+    )
+  }
+
   return {
-    taskId: raw?.task_id?.trim() || taskId,
-    version:
-      typeof raw?.version === 'number' && Number.isInteger(raw.version)
-        ? raw.version
-        : 0,
-    stepIndex:
-      typeof raw?.step_index === 'number' && Number.isInteger(raw.step_index)
-        ? raw.step_index
-        : 0,
+    taskId: promptTaskId,
+    version: raw.version,
+    stepIndex: raw.step_index,
     stepPrompt:
-      typeof raw?.step_prompt === 'string' && raw.step_prompt.length
+      typeof raw.step_prompt === 'string' && raw.step_prompt.length
         ? raw.step_prompt
         : undefined,
-    updatedAt: epochSecondsIso(raw?.updated_at) ?? undefined,
+    updatedAt: epochSecondsIso(raw.updated_at) ?? undefined,
     updatedBy:
-      typeof raw?.updated_by === 'string' && raw.updated_by.length
+      typeof raw.updated_by === 'string' && raw.updated_by.length
         ? raw.updated_by
         : undefined,
     renderedPrompt:
-      typeof raw?.rendered_prompt === 'string'
+      typeof raw.rendered_prompt === 'string'
         ? raw.rendered_prompt
         : undefined,
   }

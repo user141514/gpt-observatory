@@ -143,10 +143,11 @@ test('watchdog bridge preserves canonical task identity and keeps tabs runtime-o
     assert.equal(first.tasks[0]?.currentConversation.id, CHAT_A)
     assert.equal(first.tasks[0]?.runtimeTabState, 'present')
     assert.equal(first.tasks[0]?.runtimeTab?.id, 'PAGE_A')
-    assert.equal(first.tasks[0]?.prompt.version, 2)
-    assert.equal(first.tasks[0]?.prompt.stepIndex, 4)
-    assert.equal(first.tasks[0]?.prompt.stepPrompt, '只推进当前最小验证步骤。')
-    assert.equal(first.tasks[0]?.prompt.updatedBy, 'codex')
+    assert.ok(first.tasks[0]?.prompt)
+    assert.equal(first.tasks[0].prompt.version, 2)
+    assert.equal(first.tasks[0].prompt.stepIndex, 4)
+    assert.equal(first.tasks[0].prompt.stepPrompt, '只推进当前最小验证步骤。')
+    assert.equal(first.tasks[0].prompt.updatedBy, 'codex')
 
     let entities = await store.currentEntities()
     const canonicalTask = entities.find(entity => entity.stableKey === 'task:task-alpha')
@@ -398,6 +399,86 @@ test('watchdog prompt capability fails closed before protocol v4', async () => {
   }
 })
 
+test('protocol v4 prompt payloads fail closed on missing or invalid identity/schema', async () => {
+  for (const malformed of [
+    undefined,
+    {
+      task_id: 'different-task',
+      version: 2,
+      step_index: 1,
+      step_prompt: 'wrong identity',
+    },
+    {
+      task_id: 'task-alpha',
+      version: -1,
+      step_index: 1,
+      step_prompt: 'negative version',
+    },
+    {
+      task_id: 'task-alpha',
+      version: 2,
+      step_index: -1,
+      step_prompt: 'negative step',
+    },
+  ]) {
+    const db = await createDatabase('mem://')
+    try {
+      const store = createStore(db)
+      const fetchImpl: typeof fetch = async input => {
+        const url = String(input)
+        if (url.endsWith('/health')) {
+          return jsonResponse({
+            ready: true,
+            polling_fresh: true,
+            protocol_version: 4,
+            active_count: 1,
+            degraded_count: 0,
+          })
+        }
+        if (url.endsWith('/watches')) {
+          return jsonResponse({
+            watches: [{
+              task_id: 'task-alpha',
+              conversation_id: CHAT_A,
+              target_url: `https://chatgpt.com/c/${CHAT_A}`,
+              state: 'waiting',
+              connected: true,
+              last_success_at: 1_790_000_100,
+              ...(malformed === undefined ? {} : { prompt: malformed }),
+            }],
+          })
+        }
+        if (url.includes('/json/list')) return jsonResponse([])
+        return new Response('not found', { status: 404 })
+      }
+
+      const bridge = createWatchdogBridge(store, { fetchImpl })
+      const projection = await bridge.sync()
+
+      assert.equal(projection.integration.available, false)
+      assert.equal(projection.integration.ready, false)
+      assert.match(
+        projection.integration.error ?? '',
+        /invalid watchdog prompt/i,
+      )
+
+      const task = (await store.currentEntities()).find(
+        entity => entity.stableKey === 'task:task-alpha',
+      )
+      assert.equal(
+        Object.prototype.hasOwnProperty.call(
+          task?.currentFacts ?? {},
+          'watchdog_prompt_version',
+        ),
+        false,
+        'invalid protocol-v4 prompt must never be fabricated into current facts',
+      )
+    } finally {
+      await db.close()
+    }
+  }
+})
+
 test('watchdog prompt proxy uses CAS and refreshes projection', async () => {
   const db = await createDatabase('mem://')
   try {
@@ -488,9 +569,11 @@ test('watchdog prompt proxy uses CAS and refreshes projection', async () => {
     assert.equal(updated.version, 1)
     assert.equal(updated.stepIndex, 1)
     assert.equal(updated.stepPrompt, '下一步只做接口 smoke test。')
-    assert.equal(bridge.current().tasks[0]?.prompt.version, 1)
+    const projectedPrompt = bridge.current().tasks[0]?.prompt
+    assert.ok(projectedPrompt)
+    assert.equal(projectedPrompt.version, 1)
     assert.equal(
-      bridge.current().tasks[0]?.prompt.stepPrompt,
+      projectedPrompt.stepPrompt,
       '下一步只做接口 smoke test。',
     )
 

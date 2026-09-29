@@ -5,25 +5,25 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { spawnSync } from 'node:child_process'
 
 const scriptRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const explicitInstallHome = process.env.GPT_OBSERVATORY_INSTALL_HOME
+  ? resolve(process.env.GPT_OBSERVATORY_INSTALL_HOME)
+  : undefined
 const userInstallHome = process.env.LOCALAPPDATA
   ? resolve(process.env.LOCALAPPDATA, 'GPTObservatory')
   : undefined
-const localInstalled = existsSync(resolve(scriptRoot, 'app', 'current', 'server', 'bootstrap.js'))
-const globalInstalled = Boolean(
-  userInstallHome
-  && existsSync(resolve(userInstallHome, 'app', 'current', 'server', 'bootstrap.js')),
+const installedHomes = [
+  explicitInstallHome,
+  scriptRoot,
+  userInstallHome,
+].filter(Boolean)
+const installedHome = installedHomes.find(home =>
+  existsSync(resolve(home, 'app', 'current', 'server', 'bootstrap.js')),
 )
-const installedMode = localInstalled || globalInstalled
-const inferredHome = localInstalled
-  ? scriptRoot
-  : globalInstalled
-    ? userInstallHome
-    : scriptRoot
-const expectedServerEntry = localInstalled
-  ? resolve(scriptRoot, 'app', 'current', 'server', 'bootstrap.js')
-  : globalInstalled
-    ? resolve(userInstallHome, 'app', 'current', 'server', 'bootstrap.js')
-    : resolve(scriptRoot, 'server', 'bootstrap.ts')
+const installedMode = Boolean(installedHome)
+const inferredHome = installedHome ?? scriptRoot
+const expectedServerEntry = installedMode
+  ? resolve(installedHome, 'app', 'current', 'server', 'bootstrap.js')
+  : resolve(scriptRoot, 'server', 'bootstrap.ts')
 const sourceLoader = resolve(scriptRoot, 'node_modules', 'tsx', 'dist', 'loader.mjs')
 const expectedServerArgs = installedMode
   ? [expectedServerEntry]

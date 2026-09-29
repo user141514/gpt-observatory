@@ -5,30 +5,31 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { spawn, spawnSync } from 'node:child_process'
 
 const scriptRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const explicitInstallHome = process.env.GPT_OBSERVATORY_INSTALL_HOME
+  ? resolve(process.env.GPT_OBSERVATORY_INSTALL_HOME)
+  : undefined
 const userInstallHome = process.env.LOCALAPPDATA
   ? resolve(process.env.LOCALAPPDATA, 'GPTObservatory')
   : undefined
-const localInstalledCandidate = resolve(scriptRoot, 'app', 'current')
-const globalInstalledCandidate = userInstallHome
-  ? resolve(userInstallHome, 'app', 'current')
-  : undefined
-const installedCandidate = existsSync(resolve(localInstalledCandidate, 'server', 'index.js'))
-  ? localInstalledCandidate
-  : globalInstalledCandidate
-const installedMode = Boolean(
-  installedCandidate
-  && existsSync(resolve(installedCandidate, 'server', 'index.js')),
+const installedCandidates = [
+  explicitInstallHome
+    ? resolve(explicitInstallHome, 'app', 'current')
+    : undefined,
+  resolve(scriptRoot, 'app', 'current'),
+  userInstallHome
+    ? resolve(userInstallHome, 'app', 'current')
+    : undefined,
+].filter(Boolean)
+const installedCandidate = installedCandidates.find(candidate =>
+  existsSync(resolve(candidate, 'server', 'index.js')),
 )
+const installedMode = Boolean(installedCandidate)
 const appRoot = resolve(
   process.env.GPT_OBSERVATORY_APP_ROOT
     ?? (installedMode ? installedCandidate : scriptRoot),
 )
 const inferredHome = installedMode
-  ? (
-      installedCandidate === localInstalledCandidate
-        ? scriptRoot
-        : userInstallHome
-    )
+  ? resolve(installedCandidate, '..', '..')
   : appRoot
 const homeRoot = resolve(
   process.env.GPT_OBSERVATORY_HOME ?? inferredHome,

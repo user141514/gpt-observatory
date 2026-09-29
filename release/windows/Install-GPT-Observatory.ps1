@@ -58,3 +58,5 @@ if ($LASTEXITCODE -ne 0) {
 if ($LASTEXITCODE -ne 0) {
   throw "GPT Observatory installed but failed to launch."
 }
+
+exit 0

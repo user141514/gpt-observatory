@@ -2,8 +2,6 @@ name: Windows Release
 
 on:
   push:
-    branches:
-      - "release-ci-smoke"
     tags:
       - "v*"
   workflow_dispatch:

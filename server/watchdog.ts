@@ -18,6 +18,45 @@ export interface WatchdogHealth {
   degraded_count?: number
 }
 
+export interface WatchdogPromptState {
+  task_id: string
+  version: number
+  step_index: number
+  step_prompt?: string | null
+  updated_at?: number | null
+  updated_by?: string | null
+  rendered_prompt?: string
+}
+
+export interface TaskPromptState {
+  taskId: string
+  version: number
+  stepIndex: number
+  stepPrompt?: string
+  updatedAt?: string
+  updatedBy?: string
+  renderedPrompt?: string
+}
+
+export interface PromptUpdateInput {
+  taskId: string
+  expectedVersion: number
+  stepIndex: number
+  stepPrompt?: string | null
+  updatedBy?: string
+}
+
+export class WatchdogRequestError extends Error {
+  readonly status: number
+  readonly body: unknown
+
+  constructor(status: number, body: unknown, url: string) {
+    super(`Watchdog HTTP ${status} from ${url}: ${typeof body === 'string' ? body : JSON.stringify(body)}`)
+    this.status = status
+    this.body = body
+  }
+}
+
 export interface WatchdogWatch {
   task_id?: string
   task_label?: string | null
@@ -32,6 +71,7 @@ export interface WatchdogWatch {
   consecutive_failures?: number
   last_error?: string | null
   diagnostics?: Record<string, unknown> | null
+  prompt?: WatchdogPromptState | null
 }
 
 export interface RelayTarget {
@@ -67,12 +107,14 @@ export interface SupervisedTaskView {
   lastSuccessAt?: string
   consecutiveFailures: number
   lastError?: string
+  prompt: TaskPromptState
 }
 
 export interface SupervisedTasksProjection {
   integration: {
     available: boolean
     ready: boolean
+    promptAvailable: boolean
     watchdogUrl: string
     relayUrl: string
     lastSyncAt?: string
@@ -122,6 +164,7 @@ export function createWatchdogBridge(
     integration: {
       available: false,
       ready: false,
+      promptAvailable: false,
       watchdogUrl,
       relayUrl,
     },
@@ -150,6 +193,9 @@ export function createWatchdogBridge(
 
       const watches = Array.isArray(watchesPayload.watches) ? watchesPayload.watches : []
       const integrationReady = Boolean(health.ready) && Boolean(health.polling_fresh)
+      const promptAvailable =
+        typeof health.protocol_version === 'number'
+        && health.protocol_version >= 4
 
       let relayTargets: RelayTarget[] | undefined
       try {
@@ -278,39 +324,58 @@ export function createWatchdogBridge(
           && watch.connected
           && !watch.last_error
           && watch.last_success_at != null
+        const prompt = normalizePrompt(watch.prompt, taskId)
+        const taskCoverage = [
+          'watchdog_registered',
+          'watchdog_state',
+          'watchdog_connected',
+          'watchdog_operational',
+          'current_conversation_id',
+          'watchdog_consecutive_failures',
+          'watchdog_last_error',
+          'watchdog_last_poll_at',
+          'watchdog_last_success_at',
+          'watchdog_registered_at',
+          'binding_changed_at',
+          'task_identity_source',
+        ]
+        const taskFacts: Record<string, unknown> = {
+          watchdog_registered: true,
+          watchdog_state: watch.state,
+          watchdog_connected: watch.connected,
+          watchdog_operational: operational,
+          current_conversation_id: watch.conversation_id,
+          watchdog_consecutive_failures: numberOrZero(watch.consecutive_failures),
+          watchdog_last_error: watch.last_error ?? null,
+          watchdog_last_poll_at: epochSecondsIso(watch.last_poll_at),
+          watchdog_last_success_at: epochSecondsIso(watch.last_success_at),
+          watchdog_registered_at: epochSecondsIso(watch.registered_at),
+          binding_changed_at: epochSecondsIso(watch.binding_changed_at),
+          task_identity_source: identitySource,
+        }
+        if (promptAvailable && watch.prompt) {
+          taskCoverage.push(
+            'watchdog_prompt_version',
+            'watchdog_prompt_step_index',
+            'watchdog_prompt_step_prompt',
+            'watchdog_prompt_updated_at',
+            'watchdog_prompt_updated_by',
+          )
+          Object.assign(taskFacts, {
+            watchdog_prompt_version: prompt.version,
+            watchdog_prompt_step_index: prompt.stepIndex,
+            watchdog_prompt_step_prompt: prompt.stepPrompt ?? null,
+            watchdog_prompt_updated_at: prompt.updatedAt ?? null,
+            watchdog_prompt_updated_by: prompt.updatedBy ?? null,
+          })
+        }
 
         await store.observe({
           source: WATCHDOG_SOURCE,
           entity: taskEntity,
           observedAt,
-          coverage: [
-            'watchdog_registered',
-            'watchdog_state',
-            'watchdog_connected',
-            'watchdog_operational',
-            'current_conversation_id',
-            'watchdog_consecutive_failures',
-            'watchdog_last_error',
-            'watchdog_last_poll_at',
-            'watchdog_last_success_at',
-            'watchdog_registered_at',
-            'binding_changed_at',
-            'task_identity_source',
-          ],
-          facts: {
-            watchdog_registered: true,
-            watchdog_state: watch.state,
-            watchdog_connected: watch.connected,
-            watchdog_operational: operational,
-            current_conversation_id: watch.conversation_id,
-            watchdog_consecutive_failures: numberOrZero(watch.consecutive_failures),
-            watchdog_last_error: watch.last_error ?? null,
-            watchdog_last_poll_at: epochSecondsIso(watch.last_poll_at),
-            watchdog_last_success_at: epochSecondsIso(watch.last_success_at),
-            watchdog_registered_at: epochSecondsIso(watch.registered_at),
-            binding_changed_at: epochSecondsIso(watch.binding_changed_at),
-            task_identity_source: identitySource,
-          },
+          coverage: taskCoverage,
+          facts: taskFacts,
           rawPayload: watch,
           status: watch.last_error || !integrationReady ? 'partial' : 'ok',
         })
@@ -391,6 +456,7 @@ export function createWatchdogBridge(
           lastSuccessAt: epochSecondsIso(watch.last_success_at) ?? undefined,
           consecutiveFailures: numberOrZero(watch.consecutive_failures),
           lastError: watch.last_error ?? undefined,
+          prompt,
         })
       }
 
@@ -458,6 +524,7 @@ export function createWatchdogBridge(
         integration: {
           available: true,
           ready: integrationReady,
+          promptAvailable,
           watchdogUrl,
           relayUrl,
           lastSyncAt: observedAt,
@@ -473,6 +540,7 @@ export function createWatchdogBridge(
           ...projection.integration,
           available: false,
           ready: false,
+          promptAvailable: false,
           lastSyncAt: observedAt,
           error: error instanceof Error ? error.message : String(error),
         },
@@ -481,11 +549,78 @@ export function createWatchdogBridge(
     }
   }
 
+  async function requirePromptCapability(): Promise<void> {
+    let currentProjection = projection
+    if (
+      !currentProjection.integration.available
+      || currentProjection.integration.health?.protocol_version === undefined
+    ) {
+      currentProjection = await sync()
+    }
+
+    if (!currentProjection.integration.available) {
+      throw new WatchdogRequestError(
+        503,
+        {
+          error: 'watchdog_unavailable',
+          message: currentProjection.integration.error ?? 'Watchdog is unavailable.',
+        },
+        `${watchdogUrl}/health`,
+      )
+    }
+
+    const currentVersion =
+      currentProjection.integration.health?.protocol_version ?? 0
+    if (currentVersion < 4) {
+      throw new WatchdogRequestError(
+        409,
+        {
+          error: 'prompt_protocol_unsupported',
+          required_protocol_version: 4,
+          current_protocol_version: currentVersion,
+        },
+        `${watchdogUrl}/health`,
+      )
+    }
+  }
+
+  async function getPrompt(taskId: string): Promise<TaskPromptState> {
+    await requirePromptCapability()
+    const raw = await fetchJson<WatchdogPromptState>(
+      fetchImpl,
+      `${watchdogUrl}/prompt?task_id=${encodeURIComponent(taskId)}`,
+    )
+    return normalizePrompt(raw, taskId)
+  }
+
+  async function updatePrompt(
+    input: PromptUpdateInput,
+  ): Promise<TaskPromptState> {
+    await requirePromptCapability()
+    const raw = await fetchJson<WatchdogPromptState>(
+      fetchImpl,
+      `${watchdogUrl}/prompt`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          task_id: input.taskId,
+          expected_version: input.expectedVersion,
+          step_index: input.stepIndex,
+          step_prompt: input.stepPrompt ?? null,
+          updated_by: input.updatedBy,
+        }),
+      },
+    )
+    await sync()
+    return normalizePrompt(raw, input.taskId)
+  }
+
   function current(): SupervisedTasksProjection {
     return projection
   }
 
-  return { sync, current }
+  return { sync, current, getPrompt, updatePrompt }
 }
 
 async function markConversationUnbound(
@@ -533,6 +668,36 @@ function epochSecondsIso(value: number | null | undefined): string | null {
   return new Date(value * 1000).toISOString()
 }
 
+function normalizePrompt(
+  raw: WatchdogPromptState | null | undefined,
+  taskId: string,
+): TaskPromptState {
+  return {
+    taskId: raw?.task_id?.trim() || taskId,
+    version:
+      typeof raw?.version === 'number' && Number.isInteger(raw.version)
+        ? raw.version
+        : 0,
+    stepIndex:
+      typeof raw?.step_index === 'number' && Number.isInteger(raw.step_index)
+        ? raw.step_index
+        : 0,
+    stepPrompt:
+      typeof raw?.step_prompt === 'string' && raw.step_prompt.length
+        ? raw.step_prompt
+        : undefined,
+    updatedAt: epochSecondsIso(raw?.updated_at) ?? undefined,
+    updatedBy:
+      typeof raw?.updated_by === 'string' && raw.updated_by.length
+        ? raw.updated_by
+        : undefined,
+    renderedPrompt:
+      typeof raw?.rendered_prompt === 'string'
+        ? raw.rendered_prompt
+        : undefined,
+  }
+}
+
 function numberOrZero(value: number | undefined): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
@@ -553,12 +718,21 @@ function exactConversationId(url: string): string | undefined {
 async function fetchJson<T>(
   fetchImpl: typeof fetch,
   url: string,
+  init: RequestInit = {},
 ): Promise<T> {
   const response = await fetchImpl(url, {
+    ...init,
     signal: AbortSignal.timeout(3000),
   })
-  if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText} from ${url}`)
+  const text = await response.text()
+  let body: unknown = text
+  try {
+    body = text ? JSON.parse(text) : null
+  } catch {
+    // Preserve non-JSON boundary responses for diagnostics.
   }
-  return response.json() as Promise<T>
+  if (!response.ok) {
+    throw new WatchdogRequestError(response.status, body, url)
+  }
+  return body as T
 }

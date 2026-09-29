@@ -21,12 +21,15 @@ import {
   History,
   Info,
   Layers3,
+  LockKeyhole,
   Maximize2,
   MessageSquareText,
   Monitor,
   Network,
   Orbit,
   RefreshCw,
+  RotateCcw,
+  Save,
   Search as SearchIcon,
   Server,
   ShieldCheck,
@@ -66,6 +69,7 @@ export default function App() {
     integration: {
       available: false,
       ready: false,
+      promptAvailable: false,
       watchdogUrl: 'http://127.0.0.1:9235',
       relayUrl: 'http://127.0.0.1:9224',
     },
@@ -207,7 +211,12 @@ export default function App() {
         )}
 
         <section className="workspace-panel">
-          {tab === 'tasks' && <SupervisedTasks data={supervised} />}
+          {tab === 'tasks' && (
+            <SupervisedTasks
+              data={supervised}
+              onPromptSaved={refresh}
+            />
+          )}
           {tab === 'now' && <Now data={now} />}
           {tab === 'timeline' && <Timeline events={timeline} />}
           {tab === 'graph' && <GraphWorkbench data={graph} />}
@@ -233,7 +242,13 @@ function Metric({ zh, en, value, detail }: { zh: string; en: string; value: numb
   )
 }
 
-function SupervisedTasks({ data }: { data: SupervisedTasksResponse }) {
+function SupervisedTasks({
+  data,
+  onPromptSaved,
+}: {
+  data: SupervisedTasksResponse
+  onPromptSaved: () => Promise<void>
+}) {
   const healthy = data.integration.ready
     ? data.tasks.filter(task => task.operational).length
     : 0
@@ -282,6 +297,8 @@ function SupervisedTasks({ data }: { data: SupervisedTasksResponse }) {
             <SupervisedTaskCard
               task={task}
               integrationAvailable={data.integration.ready}
+              promptWritable={data.integration.promptAvailable}
+              onPromptSaved={onPromptSaved}
               key={task.taskId}
             />
           ))}
@@ -301,9 +318,13 @@ function SupervisedTasks({ data }: { data: SupervisedTasksResponse }) {
 function SupervisedTaskCard({
   task,
   integrationAvailable,
+  promptWritable,
+  onPromptSaved,
 }: {
   task: SupervisedTask
   integrationAvailable: boolean
+  promptWritable: boolean
+  onPromptSaved: () => Promise<void>
 }) {
   const status = taskStatus(task, integrationAvailable)
   return (
@@ -385,7 +406,196 @@ function SupervisedTaskCard({
           <code>{task.lastError}</code>
         </div>
       )}
+
+      <TaskPromptEditor
+        key={`${task.taskId}:${task.prompt.version}`}
+        task={task}
+        writable={promptWritable}
+        onSaved={onPromptSaved}
+      />
     </article>
+  )
+}
+
+function TaskPromptEditor({
+  task,
+  writable,
+  onSaved,
+}: {
+  task: SupervisedTask
+  writable: boolean
+  onSaved: () => Promise<void>
+}) {
+  const [stepIndex, setStepIndex] = useState(task.prompt.stepIndex + 1)
+  const [stepPrompt, setStepPrompt] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [previewing, setPreviewing] = useState(false)
+  const [preview, setPreview] = useState('')
+  const [feedback, setFeedback] = useState('')
+
+  async function savePrompt(value: string | null) {
+    if (!writable || saving) return
+    setSaving(true)
+    setFeedback('')
+    try {
+      await api.updateTaskPrompt(task.taskId, {
+        expectedVersion: task.prompt.version,
+        stepIndex,
+        stepPrompt: value,
+        updatedBy: 'observatory-ui',
+      })
+      setFeedback(
+        value == null
+          ? '已清空自适应提示词；下一轮只发送基础监督 envelope。'
+          : '已保存；Watchdog 下一轮会使用新版本。',
+      )
+      await onSaved()
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      setFeedback(
+        message.includes('409')
+          ? '版本冲突：提示词已被其它入口更新。请刷新后基于最新版本再写。'
+          : message,
+      )
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function loadPreview() {
+    if (previewing) return
+    setPreviewing(true)
+    setFeedback('')
+    try {
+      const current = await api.taskPrompt(task.taskId)
+      setPreview(current.renderedPrompt ?? '')
+      if (!current.renderedPrompt) {
+        setFeedback('Watchdog 没有返回 rendered prompt。')
+      }
+    } catch (cause) {
+      setFeedback(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setPreviewing(false)
+    }
+  }
+
+  return (
+    <details className="task-prompt-panel">
+      <summary>
+        <span className="task-prompt-summary-icon">
+          <Sparkles size={15} strokeWidth={1.7} />
+        </span>
+        <span>
+          <strong>自适应继续提示词</strong>
+          <small>ADAPTIVE CONTINUATION PROMPT</small>
+        </span>
+        <code>v{task.prompt.version} · step {task.prompt.stepIndex}</code>
+      </summary>
+
+      <div className="task-prompt-body">
+        <div className="prompt-lock-note">
+          <LockKeyhole size={15} strokeWidth={1.7} />
+          <div>
+            <strong>基础监督 envelope 已锁定</strong>
+            <span>
+              Task ID、SUPERVISOR_DONE、NEED_INPUT 与完成门由 Watchdog 强制拼接，
+              自适应内容不能覆盖。
+            </span>
+          </div>
+        </div>
+
+        <div className="current-prompt-block">
+          <div className="prompt-block-head">
+            <span>当前步骤提示词 <small>CURRENT ADAPTIVE STEP</small></span>
+            <code>v{task.prompt.version}</code>
+          </div>
+          <p>
+            {task.prompt.stepPrompt
+              ?? '当前没有自适应内容；Watchdog 只使用基础继续 envelope。'}
+          </p>
+          <div className="prompt-meta-row">
+            <span>step {task.prompt.stepIndex}</span>
+            <span>{task.prompt.updatedBy ?? 'system/default'}</span>
+            <span>{task.prompt.updatedAt ? dateTime(task.prompt.updatedAt) : '未单独更新'}</span>
+          </div>
+        </div>
+
+        <div className="next-prompt-editor">
+          <div className="prompt-editor-head">
+            <div>
+              <strong>写下一步</strong>
+              <small>WRITE NEXT STEP</small>
+            </div>
+            <label>
+              step
+              <input
+                type="number"
+                min={0}
+                value={stepIndex}
+                onChange={event => {
+                  const value = Number(event.target.value)
+                  if (Number.isInteger(value) && value >= 0) setStepIndex(value)
+                }}
+              />
+            </label>
+          </div>
+
+          <textarea
+            value={stepPrompt}
+            onChange={event => setStepPrompt(event.target.value)}
+            maxLength={12000}
+            placeholder="例：只执行 EXP-004 的最小判别实验；完成后汇报结果并根据残差决定下一步，不扩展其它方向。"
+            disabled={!writable || saving}
+          />
+
+          <div className="prompt-editor-actions">
+            <button
+              type="button"
+              className="prompt-save-button"
+              disabled={!writable || saving || !stepPrompt.trim()}
+              onClick={() => void savePrompt(stepPrompt.trim())}
+            >
+              <Save size={13} />
+              {saving ? '保存中' : '保存下一步'}
+            </button>
+            <button
+              type="button"
+              className="prompt-secondary-button"
+              disabled={!writable || saving}
+              onClick={() => void savePrompt(null)}
+            >
+              <RotateCcw size={13} />
+              清空自适应
+            </button>
+            <button
+              type="button"
+              className="prompt-secondary-button"
+              disabled={previewing || !writable}
+              onClick={() => void loadPreview()}
+            >
+              <FileText size={13} />
+              {previewing ? '读取中' : '实际发送预览'}
+            </button>
+          </div>
+
+          {!writable && (
+            <p className="prompt-feedback degraded">
+              当前 Watchdog 未提供 protocol-v4 prompt 能力或控制接口不可用，提示词保持只读。
+            </p>
+          )}
+          {feedback && <p className="prompt-feedback">{feedback}</p>}
+        </div>
+
+        {preview && (
+          <div className="prompt-preview">
+            <div className="prompt-block-head">
+              <span>Watchdog 实际发送内容 <small>RENDERED PROMPT</small></span>
+            </div>
+            <pre>{preview}</pre>
+          </div>
+        )}
+      </div>
+    </details>
   )
 }
 
@@ -1639,6 +1849,11 @@ const FACT_FIELD_META: Record<string, FactFieldMeta> = {
   watchdog_last_poll_at: { zh: '最近轮询', en: 'Last poll', group: 'supervision' },
   watchdog_last_success_at: { zh: '最近成功', en: 'Last success', group: 'supervision' },
   watchdog_registered_at: { zh: '监督注册时间', en: 'Registered at', group: 'supervision' },
+  watchdog_prompt_version: { zh: '提示词版本', en: 'Prompt version', group: 'supervision' },
+  watchdog_prompt_step_index: { zh: '提示词步骤', en: 'Prompt step', group: 'supervision' },
+  watchdog_prompt_step_prompt: { zh: '自适应步骤提示词', en: 'Adaptive step prompt', group: 'supervision' },
+  watchdog_prompt_updated_at: { zh: '提示词更新时间', en: 'Prompt updated at', group: 'supervision' },
+  watchdog_prompt_updated_by: { zh: '提示词更新者', en: 'Prompt updated by', group: 'supervision' },
   task_identity_source: { zh: '任务身份来源', en: 'Task identity source', group: 'supervision' },
   watchdog_live_gate: { zh: 'Watchdog 实机验收', en: 'Watchdog live gate', group: 'supervision' },
   watchdog_protocol: { zh: 'Watchdog 协议', en: 'Watchdog protocol', group: 'supervision' },

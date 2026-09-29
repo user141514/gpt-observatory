@@ -62,6 +62,23 @@ export interface GraphResponse {
   }>
 }
 
+export interface TaskPromptState {
+  taskId: string
+  version: number
+  stepIndex: number
+  stepPrompt?: string
+  updatedAt?: string
+  updatedBy?: string
+  renderedPrompt?: string
+}
+
+export interface PromptUpdateInput {
+  expectedVersion: number
+  stepIndex: number
+  stepPrompt?: string | null
+  updatedBy?: string
+}
+
 export interface SupervisedTask {
   taskId: string
   stableKey: string
@@ -88,12 +105,14 @@ export interface SupervisedTask {
   lastSuccessAt?: string
   consecutiveFailures: number
   lastError?: string
+  prompt: TaskPromptState
 }
 
 export interface SupervisedTasksResponse {
   integration: {
     available: boolean
     ready: boolean
+    promptAvailable: boolean
     watchdogUrl: string
     relayUrl: string
     lastSyncAt?: string
@@ -104,6 +123,7 @@ export interface SupervisedTasksResponse {
       active_count?: number
       degraded_count?: number
       last_poll_error?: string | null
+      protocol_version?: number
     }
   }
   tasks: SupervisedTask[]

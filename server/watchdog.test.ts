@@ -4,7 +4,9 @@ import { createDatabase } from './db.js'
 import { createStore } from './store.js'
 import {
   createWatchdogBridge,
+  WatchdogRequestError,
   type WatchdogHealth,
+  type WatchdogPromptState,
   type WatchdogWatch,
 } from './watchdog.js'
 
@@ -72,7 +74,7 @@ test('watchdog bridge preserves canonical task identity and keeps tabs runtime-o
     let health: WatchdogHealth = {
       ready: true,
       polling_fresh: true,
-      protocol_version: 3,
+      protocol_version: 4,
       active_count: 1,
       degraded_count: 0,
     }
@@ -91,6 +93,14 @@ test('watchdog bridge preserves canonical task identity and keeps tabs runtime-o
         last_success_at: 1_790_000_100,
         consecutive_failures: 0,
         last_error: null,
+        prompt: {
+          task_id: 'task-alpha',
+          version: 2,
+          step_index: 4,
+          step_prompt: '只推进当前最小验证步骤。',
+          updated_at: 1_790_000_090,
+          updated_by: 'codex',
+        },
       },
     ]
 
@@ -125,6 +135,7 @@ test('watchdog bridge preserves canonical task identity and keeps tabs runtime-o
     const first = await bridge.sync()
     assert.equal(first.integration.available, true, first.integration.error)
     assert.equal(first.integration.ready, true)
+    assert.equal(first.integration.promptAvailable, true)
     assert.equal(first.tasks.length, 1)
     assert.equal(first.tasks[0]?.taskId, 'task-alpha')
     assert.equal(first.tasks[0]?.stableKey, 'task:task-alpha')
@@ -132,11 +143,22 @@ test('watchdog bridge preserves canonical task identity and keeps tabs runtime-o
     assert.equal(first.tasks[0]?.currentConversation.id, CHAT_A)
     assert.equal(first.tasks[0]?.runtimeTabState, 'present')
     assert.equal(first.tasks[0]?.runtimeTab?.id, 'PAGE_A')
+    assert.equal(first.tasks[0]?.prompt.version, 2)
+    assert.equal(first.tasks[0]?.prompt.stepIndex, 4)
+    assert.equal(first.tasks[0]?.prompt.stepPrompt, '只推进当前最小验证步骤。')
+    assert.equal(first.tasks[0]?.prompt.updatedBy, 'codex')
 
     let entities = await store.currentEntities()
     const canonicalTask = entities.find(entity => entity.stableKey === 'task:task-alpha')
     assert.equal(canonicalTask?.type, 'task')
     assert.equal(canonicalTask?.currentFacts.watchdog_registered, true)
+    assert.equal(canonicalTask?.currentFacts.watchdog_prompt_version, 2)
+    assert.equal(canonicalTask?.currentFacts.watchdog_prompt_step_index, 4)
+    assert.equal(
+      canonicalTask?.currentFacts.watchdog_prompt_step_prompt,
+      '只推进当前最小验证步骤。',
+    )
+    assert.equal(canonicalTask?.currentFacts.watchdog_prompt_updated_by, 'codex')
 
     const currentConversationA = entities.find(
       entity => entity.stableKey === `conversation:${CHAT_A}`,
@@ -296,9 +318,203 @@ test('watchdog bridge preserves canonical task identity and keeps tabs runtime-o
   }
 })
 
-function jsonResponse(value: unknown): Response {
+test('watchdog prompt capability fails closed before protocol v4', async () => {
+  const db = await createDatabase('mem://')
+  try {
+    const store = createStore(db)
+    let promptRequests = 0
+    const fetchImpl: typeof fetch = async input => {
+      const url = String(input)
+      if (url.endsWith('/health')) {
+        return jsonResponse({
+          ready: true,
+          polling_fresh: true,
+          protocol_version: 3,
+          active_count: 1,
+          degraded_count: 0,
+        })
+      }
+      if (url.endsWith('/watches')) {
+        return jsonResponse({
+          watches: [{
+            task_id: 'task-legacy',
+            task_label: 'Legacy Watchdog',
+            conversation_id: CHAT_A,
+            target_url: `https://chatgpt.com/c/${CHAT_A}`,
+            state: 'waiting',
+            connected: true,
+            last_success_at: 1_790_000_100,
+          }],
+        })
+      }
+      if (url.includes('/json/list')) return jsonResponse([])
+      if (url.includes('/prompt')) {
+        promptRequests += 1
+        return new Response('legacy watchdog has no prompt endpoint', { status: 404 })
+      }
+      return new Response('not found', { status: 404 })
+    }
+
+    const bridge = createWatchdogBridge(store, { fetchImpl })
+    const projection = await bridge.sync()
+
+    assert.equal(projection.integration.available, true)
+    assert.equal(projection.integration.promptAvailable, false)
+
+    const entity = (await store.currentEntities()).find(
+      item => item.stableKey === 'task:task-legacy',
+    )
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(
+        entity?.currentFacts ?? {},
+        'watchdog_prompt_version',
+      ),
+      false,
+      'pre-v4 absence must not be fabricated as prompt version zero',
+    )
+
+    await assert.rejects(
+      bridge.getPrompt('task-legacy'),
+      (error: unknown) =>
+        error instanceof WatchdogRequestError
+        && error.status === 409
+        && (error.body as { error?: string }).error === 'prompt_protocol_unsupported',
+    )
+    await assert.rejects(
+      bridge.updatePrompt({
+        taskId: 'task-legacy',
+        expectedVersion: 0,
+        stepIndex: 1,
+        stepPrompt: 'must not be sent',
+      }),
+      (error: unknown) =>
+        error instanceof WatchdogRequestError
+        && error.status === 409
+        && (error.body as { error?: string }).error === 'prompt_protocol_unsupported',
+    )
+    assert.equal(promptRequests, 0)
+  } finally {
+    await db.close()
+  }
+})
+
+test('watchdog prompt proxy uses CAS and refreshes projection', async () => {
+  const db = await createDatabase('mem://')
+  try {
+    const store = createStore(db)
+    let prompt: WatchdogPromptState = {
+      task_id: 'task-alpha',
+      version: 0,
+      step_index: 0,
+      step_prompt: null,
+      updated_at: null,
+      updated_by: null,
+    }
+    const watch: WatchdogWatch = {
+      task_id: 'task-alpha',
+      task_label: 'Prompt Task',
+      conversation_id: CHAT_A,
+      target_url: `https://chatgpt.com/c/${CHAT_A}`,
+      state: 'waiting',
+      connected: true,
+      registered_at: 1_790_000_000,
+      binding_changed_at: 1_790_000_000,
+      last_poll_at: 1_790_000_100,
+      last_success_at: 1_790_000_100,
+      consecutive_failures: 0,
+      last_error: null,
+      prompt,
+    }
+
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/health')) {
+        return jsonResponse({
+          ready: true,
+          polling_fresh: true,
+          protocol_version: 4,
+          active_count: 1,
+          degraded_count: 0,
+        })
+      }
+      if (url.endsWith('/watches')) {
+        return jsonResponse({ watches: [{ ...watch, prompt }] })
+      }
+      if (url.includes('/json/list')) return jsonResponse([])
+      if (url.includes('/prompt?task_id=')) {
+        return jsonResponse({ ...prompt, rendered_prompt: 'rendered prompt' })
+      }
+      if (url.endsWith('/prompt') && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>
+        if (body.expected_version !== prompt.version) {
+          return jsonResponse(
+            {
+              error: 'prompt_version_conflict',
+              expected_version: body.expected_version,
+              current_version: prompt.version,
+            },
+            409,
+          )
+        }
+        prompt = {
+          task_id: 'task-alpha',
+          version: prompt.version + 1,
+          step_index: Number(body.step_index),
+          step_prompt:
+            typeof body.step_prompt === 'string' ? body.step_prompt : null,
+          updated_at: 1_790_000_200,
+          updated_by:
+            typeof body.updated_by === 'string' ? body.updated_by : null,
+        }
+        return jsonResponse(prompt)
+      }
+      return new Response('not found', { status: 404 })
+    }
+
+    const bridge = createWatchdogBridge(store, {
+      fetchImpl,
+      now: () => new Date('2026-09-28T11:00:00.000Z'),
+    })
+
+    await bridge.sync()
+    const updated = await bridge.updatePrompt({
+      taskId: 'task-alpha',
+      expectedVersion: 0,
+      stepIndex: 1,
+      stepPrompt: '下一步只做接口 smoke test。',
+      updatedBy: 'mcp',
+    })
+
+    assert.equal(updated.version, 1)
+    assert.equal(updated.stepIndex, 1)
+    assert.equal(updated.stepPrompt, '下一步只做接口 smoke test。')
+    assert.equal(bridge.current().tasks[0]?.prompt.version, 1)
+    assert.equal(
+      bridge.current().tasks[0]?.prompt.stepPrompt,
+      '下一步只做接口 smoke test。',
+    )
+
+    await assert.rejects(
+      bridge.updatePrompt({
+        taskId: 'task-alpha',
+        expectedVersion: 0,
+        stepIndex: 2,
+        stepPrompt: 'stale overwrite',
+        updatedBy: 'stale-agent',
+      }),
+      (error: unknown) =>
+        error instanceof WatchdogRequestError
+        && error.status === 409
+        && (error.body as { error?: string }).error === 'prompt_version_conflict',
+    )
+  } finally {
+    await db.close()
+  }
+})
+
+function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
-    status: 200,
+    status,
     headers: { 'content-type': 'application/json' },
   })
 }

@@ -34,6 +34,46 @@ async function main() {
       result = await client.search(query)
       break
     }
+    case 'tasks':
+      result = await client.supervisedTasks()
+      break
+    case 'prompt-get': {
+      const taskId = args[0]?.trim()
+      if (!taskId) throw new Error('prompt-get requires a task id')
+      result = await client.taskPrompt(taskId)
+      break
+    }
+    case 'prompt-set': {
+      const taskId = args[0]?.trim()
+      if (!taskId) throw new Error('prompt-set requires a task id')
+      const expectedVersion = nonNegativeIntegerOption(args, '--expected-version')
+      const stepIndex = nonNegativeIntegerOption(args, '--step-index')
+      const updatedBy = stringOption(args, '--updated-by')
+      let stepPrompt: string | null
+      if (args.includes('--clear')) {
+        stepPrompt = null
+      } else {
+        const prompt = stringOption(args, '--prompt')
+        const file = stringOption(args, '--file')
+        if (prompt != null && file != null) {
+          throw new Error('use only one of --prompt or --file')
+        }
+        if (file != null) {
+          stepPrompt = await readFile(file, 'utf8')
+        } else if (prompt != null) {
+          stepPrompt = prompt
+        } else {
+          throw new Error('prompt-set requires --prompt, --file, or --clear')
+        }
+      }
+      result = await client.updateTaskPrompt(taskId, {
+        expectedVersion,
+        stepIndex,
+        stepPrompt,
+        updatedBy,
+      })
+      break
+    }
     case 'observe':
       result = await client.observe(await jsonInput(args))
       break
@@ -56,6 +96,24 @@ function positional(args: string[]): string[] {
     if (index > 0 && ['--recent', '--json', '--file'].includes(args[index - 1]!)) return false
     return true
   })
+}
+
+function stringOption(args: string[], name: string): string | undefined {
+  const index = args.indexOf(name)
+  if (index < 0) return undefined
+  const value = args[index + 1]
+  if (!value) throw new Error(`${name} requires a value`)
+  return value
+}
+
+function nonNegativeIntegerOption(args: string[], name: string): number {
+  const raw = stringOption(args, name)
+  if (raw == null) throw new Error(`${name} is required`)
+  const value = Number(raw)
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`${name} requires a non-negative integer`)
+  }
+  return value
 }
 
 function numberOption(args: string[], name: string, fallback: number): number {
@@ -101,6 +159,11 @@ Usage:
   npm run agent -- timeline
   npm run agent -- graph
   npm run agent -- search <query>
+  npm run agent -- tasks
+  npm run agent -- prompt-get <task-id>
+  npm run agent -- prompt-set <task-id> --expected-version 2 --step-index 3 --prompt "next step" [--updated-by agent]
+  npm run agent -- prompt-set <task-id> --expected-version 2 --step-index 3 --file next-prompt.txt
+  npm run agent -- prompt-set <task-id> --expected-version 2 --step-index 3 --clear
   npm run agent -- observe --json '<payload>'
   npm run agent -- relate --json '<payload>'
   npm run agent -- reindex

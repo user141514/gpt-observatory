@@ -31,6 +31,31 @@ export class ObservatoryAgentClient {
     return this.get(`/api/search?q=${encodeURIComponent(query)}`)
   }
 
+  async supervisedTasks() {
+    return this.get('/api/supervised-tasks')
+  }
+
+  async taskPrompt(taskId: string) {
+    return this.get(
+      `/api/supervised-tasks/${encodeURIComponent(taskId)}/prompt`,
+    )
+  }
+
+  async updateTaskPrompt(
+    taskId: string,
+    payload: {
+      expectedVersion: number
+      stepIndex: number
+      stepPrompt?: string | null
+      updatedBy?: string
+    },
+  ) {
+    return this.put(
+      `/api/supervised-tasks/${encodeURIComponent(taskId)}/prompt`,
+      payload,
+    )
+  }
+
   async observe(payload: unknown) {
     return this.post('/api/observe', payload)
   }
@@ -45,11 +70,12 @@ export class ObservatoryAgentClient {
 
   async context(options: AgentContextOptions = {}) {
     const recent = Math.max(1, Math.min(100, options.recent ?? 20))
-    const [health, now, timeline, graph] = await Promise.all([
+    const [health, now, timeline, graph, supervisedTasks] = await Promise.all([
       this.health(),
       this.now(),
       this.timeline(),
       this.graph(),
+      this.supervisedTasks(),
     ])
 
     const timelineValue = timeline as { events?: unknown[] }
@@ -67,6 +93,7 @@ export class ObservatoryAgentClient {
         nodes: Array.isArray(graphValue.nodes) ? graphValue.nodes : [],
         edges: Array.isArray(graphValue.edges) ? graphValue.edges : [],
       },
+      supervisedTasks,
     }
   }
 
@@ -77,6 +104,14 @@ export class ObservatoryAgentClient {
   private async post(path: string, body: unknown): Promise<unknown> {
     return this.request(path, {
       method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  }
+
+  private async put(path: string, body: unknown): Promise<unknown> {
+    return this.request(path, {
+      method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     })

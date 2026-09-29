@@ -61,6 +61,52 @@ server.registerTool(
 )
 
 server.registerTool(
+  'observatory_supervised_tasks',
+  {
+    description:
+      'Read the Watchdog-authoritative supervised task set, including each task prompt version and current adaptive step prompt.',
+    inputSchema: {},
+  },
+  async () => toolResult(await client.supervisedTasks()),
+)
+
+server.registerTool(
+  'observatory_task_prompt_get',
+  {
+    description:
+      'Read one supervised task prompt state and the immutable-envelope rendered prompt that Watchdog will actually send.',
+    inputSchema: {
+      taskId: z.string().min(1),
+    },
+  },
+  async ({ taskId }) => toolResult(await client.taskPrompt(taskId)),
+)
+
+server.registerTool(
+  'observatory_task_prompt_update',
+  {
+    description:
+      'CAS-update the adaptive continuation prompt for one supervised task. Use this at the end of a completed minimal step to write the next-step instruction. The Watchdog-owned base envelope, SUPERVISOR_DONE gate and NEED_INPUT gate cannot be replaced.',
+    inputSchema: {
+      taskId: z.string().min(1),
+      expectedVersion: z.number().int().min(0),
+      stepIndex: z.number().int().min(0),
+      stepPrompt: z.string().max(12000).nullable().optional(),
+      updatedBy: z.string().min(1).max(128).optional(),
+    },
+  },
+  async ({ taskId, expectedVersion, stepIndex, stepPrompt, updatedBy }) =>
+    toolResult(
+      await client.updateTaskPrompt(taskId, {
+        expectedVersion,
+        stepIndex,
+        stepPrompt,
+        updatedBy,
+      }),
+    ),
+)
+
+server.registerTool(
   'observatory_search',
   {
     description: 'Semantic search over the derived local vector index of factual entity state.',

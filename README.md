@@ -117,6 +117,9 @@ gpt-observatory now
 gpt-observatory timeline
 gpt-observatory graph
 gpt-observatory search "semantic query"
+gpt-observatory tasks
+gpt-observatory prompt-get <task-id>
+gpt-observatory prompt-set <task-id> --expected-version 0 --step-index 1 --prompt "只推进下一最小可验证步骤" --updated-by agent
 ```
 
 MCP-capable clients can launch the stdio adapter with `gpt-observatory-mcp`. The MCP surface exposes:
@@ -129,8 +132,11 @@ MCP-capable clients can launch the stdio adapter with `gpt-observatory-mcp`. The
 - `observatory_observe`
 - `observatory_relate`
 - `observatory_reindex`
+- `observatory_supervised_tasks`
+- `observatory_task_prompt_get`
+- `observatory_task_prompt_update`
 
-Both adapters call the canonical HTTP API; neither opens RocksDB as another owner.
+Both adapters call the canonical HTTP API; neither opens RocksDB as another owner. Adaptive task prompts are also not owned by Observatory: prompt reads/writes are proxied to Watchdog protocol v4, where `expectedVersion` provides CAS protection. Observatory only projects the resulting prompt state into factual history and disables prompt editing when the connected Watchdog does not advertise protocol v4.
 
 ## Validate
 

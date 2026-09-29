@@ -88,6 +88,18 @@ Core invariant:
 
 > Task identity survives conversation replacement; conversation identity survives tab replacement.
 
+### Adaptive continuation prompt contract
+
+Watchdog Registry is the sole authority for each supervised Task's continuation prompt state. The state is keyed by `task_id`, versioned with CAS (`expected_version`), persisted in the Watchdog registry, and therefore survives daemon restart and conversation rebind. Watchdog—not Observatory, UI, or an agent—renders the immutable supervision envelope containing task identity, prompt version, `SUPERVISOR_DONE`, and `NEED_INPUT`; callers may only replace the adaptive step body and step index.
+
+Prompt update and continuation send share the same per-task execution fence: after an update returns success, no continuation using the replaced prompt generation may still be in flight. Protocol-v4 watchers must support prompt injection or fail closed. Observatory is only a proxy/projection: it exposes UI/CLI/MCP access, records observed prompt facts, and disables/rejects prompt operations against pre-v4 Watchdog rather than fabricating version-zero state.
+
+Recommended agent loop after each verified step:
+1. read the current Task prompt state;
+2. compare the observed result with the task target and identify the highest-leverage residual;
+3. CAS-update `expectedVersion=current.version`, increment/choose `stepIndex`, and write only the smallest next discriminating action;
+4. let Watchdog render the immutable envelope and deliver that next-step prompt on the next eligible continuation.
+
 ## V1 ontology
 
 ### Source
@@ -127,7 +139,7 @@ Embedding backend contract:
 | R5 human visual acceptance | NOW / TIMELINE / GRAPH / SEARCH use live API data | ready for human acceptance at local Vite UI on port 4318 |
 | R6 Obsidian projection | generated Markdown + .base files contain wikilinks/frontmatter | passed: API-backed export generated vault successfully |
 | R7 GPT conversation ingestion | Watchdog registered Task → current Conversation projection; Relay only resolves runtime Tab for registered conversations | passed: source tests + live protocol-v3 task-first projection |
-| R8 Watchdog supervision | task-first registry survives process restart and a real poll cycle with fresh success | passed: live deployed protocol v3, persisted task identity, real successful poll, and Observatory projection |
+| R8 Watchdog supervision | task-first registry survives process restart and a real poll cycle with fresh success | passed: live deployed task-first supervision with persisted task identity, real successful poll, and Observatory projection; adaptive prompt rollout advances the control protocol to v4 |
 
 ## Acceptance scenarios
 

@@ -7,7 +7,10 @@ import { createDatabase } from './db.js'
 import { observeWithSemanticProjection } from './observe-service.js'
 import { createSemanticIndex } from './semantic.js'
 import { createStore } from './store.js'
-import { createWatchdogBridge } from './watchdog.js'
+import {
+  createWatchdogBridge,
+  WatchdogRequestError,
+} from './watchdog.js'
 
 const app = express()
 app.use(express.json({ limit: '2mb' }))
@@ -39,6 +42,13 @@ const observeSchema = z.object({
   facts: z.record(z.string(), z.unknown()),
   rawPayload: z.unknown().optional(),
   status: z.enum(['ok', 'partial', 'error']).optional(),
+})
+
+const promptUpdateSchema = z.object({
+  expectedVersion: z.number().int().nonnegative(),
+  stepIndex: z.number().int().nonnegative(),
+  stepPrompt: z.string().max(12000).nullable().optional(),
+  updatedBy: z.string().min(1).max(128).optional(),
 })
 
 const relationSchema = z.object({
@@ -82,6 +92,31 @@ app.post('/api/watchdog/sync', async (_req, res, next) => {
   try {
     res.json(await watchdog.sync())
   } catch (error) {
+    next(error)
+  }
+})
+
+app.get('/api/supervised-tasks/:taskId/prompt', async (req, res, next) => {
+  try {
+    res.json(await watchdog.getPrompt(req.params.taskId))
+  } catch (error) {
+    if (sendWatchdogBoundaryError(res, error)) return
+    next(error)
+  }
+})
+
+app.put('/api/supervised-tasks/:taskId/prompt', async (req, res, next) => {
+  try {
+    const input = promptUpdateSchema.parse(req.body)
+    res.json(await watchdog.updatePrompt({
+      taskId: req.params.taskId,
+      expectedVersion: input.expectedVersion,
+      stepIndex: input.stepIndex,
+      stepPrompt: input.stepPrompt,
+      updatedBy: input.updatedBy,
+    }))
+  } catch (error) {
+    if (sendWatchdogBoundaryError(res, error)) return
     next(error)
   }
 })
@@ -154,6 +189,23 @@ if (existsSync(indexFile)) {
     }
     res.sendFile(indexFile)
   })
+}
+
+function sendWatchdogBoundaryError(
+  res: express.Response,
+  error: unknown,
+): boolean {
+  if (!(error instanceof WatchdogRequestError)) return false
+
+  const body =
+    error.body && typeof error.body === 'object'
+      ? error.body
+      : {
+          error: 'watchdog_request_failed',
+          message: String(error.body ?? error.message),
+        }
+  res.status(error.status).json(body)
+  return true
 }
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

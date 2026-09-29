@@ -1,19 +1,52 @@
 import type {
   GraphResponse,
   NowResponse,
+  PromptUpdateInput,
   SearchResult,
   SupervisedTasksResponse,
+  TaskPromptState,
   TimelineEvent,
 } from './types'
 
 async function getJson<T>(url: string): Promise<T> {
   const response = await fetch(url)
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
+  if (!response.ok) throw await apiError(response)
   return response.json() as Promise<T>
+}
+
+async function apiError(response: Response): Promise<Error> {
+  const text = await response.text()
+  let detail = text
+  try {
+    const body = text ? JSON.parse(text) : null
+    detail = body ? JSON.stringify(body) : response.statusText
+  } catch {
+    // Keep plain-text boundary details.
+  }
+  return new Error(`${response.status} ${response.statusText}: ${detail}`)
 }
 
 export const api = {
   supervisedTasks: () => getJson<SupervisedTasksResponse>('/api/supervised-tasks'),
+  taskPrompt: (taskId: string) =>
+    getJson<TaskPromptState>(
+      `/api/supervised-tasks/${encodeURIComponent(taskId)}/prompt`,
+    ),
+  updateTaskPrompt: async (
+    taskId: string,
+    input: PromptUpdateInput,
+  ): Promise<TaskPromptState> => {
+    const response = await fetch(
+      `/api/supervised-tasks/${encodeURIComponent(taskId)}/prompt`,
+      {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(input),
+      },
+    )
+    if (!response.ok) throw await apiError(response)
+    return response.json() as Promise<TaskPromptState>
+  },
   syncWatchdog: () =>
     fetch('/api/watchdog/sync', { method: 'POST' }).then(async response => {
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)

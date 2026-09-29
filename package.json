@@ -12,6 +12,7 @@
     "stop": "node scripts/stop-observatory.mjs",
     "app:icon": "node scripts/build-icon.mjs",
     "model:prepare": "node scripts/prepare-embedding-model.mjs",
+    "release:payload": "node scripts/assemble-release-payload.mjs",
     "app:install": "node scripts/install-desktop.mjs",
     "agent": "tsx server/agent-cli.ts",
     "agent:mcp": "tsx server/agent-mcp.ts",

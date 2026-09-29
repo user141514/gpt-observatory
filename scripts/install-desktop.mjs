@@ -17,7 +17,10 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const userHome = homedir()
 const localAppData =
   process.env.LOCALAPPDATA ?? join(userHome, 'AppData', 'Local')
-const installHome = join(localAppData, 'GPTObservatory')
+const installHome = resolve(
+  process.env.GPT_OBSERVATORY_INSTALL_HOME
+    ?? join(localAppData, 'GPTObservatory'),
+)
 const appDir = join(installHome, 'app')
 const currentDir = join(appDir, 'current')
 const stagingDir = join(appDir, `.staging-${process.pid}`)
@@ -28,8 +31,19 @@ const dataDir = join(installHome, 'data')
 const canonicalDataDir = join(dataDir, 'observatory')
 const runtimeDir = join(installHome, 'runtime')
 const iconTarget = join(installHome, 'GPT Observatory.ico')
-const binDir = join(userHome, 'bin')
+const binDir = resolve(
+  process.env.GPT_OBSERVATORY_BIN_DIR
+    ?? join(userHome, 'bin'),
+)
+const skipIntegrations =
+  process.env.GPT_OBSERVATORY_SKIP_INTEGRATIONS === '1'
 const node = process.execPath
+const releasePayloadMode =
+  process.env.GPT_OBSERVATORY_RELEASE_PAYLOAD === '1'
+const releaseMetadataPath = resolve(root, 'release.json')
+const releaseMetadata = releasePayloadMode && existsSync(releaseMetadataPath)
+  ? JSON.parse(await readFile(releaseMetadataPath, 'utf8'))
+  : undefined
 
 const sourceStart = resolve(root, 'scripts', 'start-observatory.mjs')
 const sourceStop = resolve(root, 'scripts', 'stop-observatory.mjs')
@@ -42,11 +56,13 @@ const sourceServer = resolve(root, '.release', 'server')
 const sourcePackage = resolve(root, 'package.json')
 const sourceLock = resolve(root, 'package-lock.json')
 
-await runRequired(process.execPath, ['scripts/build-icon.mjs'], root, 'icon build')
-await runNpmBuild()
+if (!releasePayloadMode) {
+  await runRequired(process.execPath, ['scripts/build-icon.mjs'], root, 'icon build')
+  await runNpmBuild()
+}
 
 if (!existsSync(sourceDist) || !existsSync(resolve(sourceServer, 'bootstrap.js'))) {
-  throw new Error('Production build artifacts are missing after build.')
+  throw new Error('Production build artifacts are missing.')
 }
 
 await Promise.all([
@@ -57,6 +73,17 @@ await Promise.all([
   mkdir(launcherDir, { recursive: true }),
   mkdir(binDir, { recursive: true }),
 ])
+
+if (releasePayloadMode) {
+  const bundledModels = resolve(root, 'models')
+  if (!existsSync(bundledModels)) {
+    throw new Error('Release payload is missing bundled models.')
+  }
+  await cp(bundledModels, join(installHome, 'models'), {
+    recursive: true,
+    force: true,
+  })
+}
 
 await runRequired(
   node,
@@ -94,26 +121,67 @@ await Promise.all([
   cp(sourceLock, join(stagingDir, 'package-lock.json')),
 ])
 
-console.log('Installing production dependencies into the staging snapshot...')
-const offline = runCommand(
-  process.platform === 'win32' ? 'cmd.exe' : 'npm',
-  process.platform === 'win32'
-    ? ['/d', '/s', '/c', 'npm ci --omit=dev --offline --no-audit --no-fund']
-    : ['ci', '--omit=dev', '--offline', '--no-audit', '--no-fund'],
-  stagingDir,
-)
-if (offline.status !== 0) {
-  console.log('Offline cache was incomplete; retrying with prefer-offline...')
-  const fallback = runCommand(
+if (releasePayloadMode) {
+  const bundledModules = resolve(root, 'node_modules')
+  if (!existsSync(bundledModules)) {
+    await rm(stagingDir, { recursive: true, force: true })
+    throw new Error('Release payload is missing production node_modules.')
+  }
+  console.log('Copying prebuilt production dependencies into the staging snapshot...')
+  const modulesTarget = join(stagingDir, 'node_modules')
+  if (process.platform === 'win32') {
+    await mkdir(modulesTarget, { recursive: true })
+    const copy = runCommand(
+      'robocopy.exe',
+      [
+        bundledModules,
+        modulesTarget,
+        '/E',
+        '/COPY:DAT',
+        '/DCOPY:DAT',
+        '/R:1',
+        '/W:1',
+        '/MT:16',
+        '/NFL',
+        '/NDL',
+        '/NJH',
+        '/NJS',
+        '/NP',
+      ],
+      root,
+    )
+    if (copy.status !== null && copy.status > 7) {
+      await rm(stagingDir, { recursive: true, force: true })
+      throw new Error(`Release payload dependency copy failed: robocopy exit ${copy.status}`)
+    }
+  } else {
+    await cp(bundledModules, modulesTarget, {
+      recursive: true,
+      force: true,
+    })
+  }
+} else {
+  console.log('Installing production dependencies into the staging snapshot...')
+  const offline = runCommand(
     process.platform === 'win32' ? 'cmd.exe' : 'npm',
     process.platform === 'win32'
-      ? ['/d', '/s', '/c', 'npm ci --omit=dev --prefer-offline --no-audit --no-fund']
-      : ['ci', '--omit=dev', '--prefer-offline', '--no-audit', '--no-fund'],
+      ? ['/d', '/s', '/c', 'npm ci --omit=dev --offline --no-audit --no-fund']
+      : ['ci', '--omit=dev', '--offline', '--no-audit', '--no-fund'],
     stagingDir,
   )
-  if (fallback.status !== 0) {
-    await rm(stagingDir, { recursive: true, force: true })
-    throw new Error('Production dependency installation failed.')
+  if (offline.status !== 0) {
+    console.log('Offline cache was incomplete; retrying with prefer-offline...')
+    const fallback = runCommand(
+      process.platform === 'win32' ? 'cmd.exe' : 'npm',
+      process.platform === 'win32'
+        ? ['/d', '/s', '/c', 'npm ci --omit=dev --prefer-offline --no-audit --no-fund']
+        : ['ci', '--omit=dev', '--prefer-offline', '--no-audit', '--no-fund'],
+      stagingDir,
+    )
+    if (fallback.status !== 0) {
+      await rm(stagingDir, { recursive: true, force: true })
+      throw new Error('Production dependency installation failed.')
+    }
   }
 }
 
@@ -148,20 +216,25 @@ await Promise.all([
   ),
 ])
 
-if (process.platform === 'win32') {
+if (process.platform === 'win32' && !skipIntegrations) {
   await installWindowsShortcuts()
 }
 
 const packageMetadata = JSON.parse(await readFile(sourcePackage, 'utf8'))
-const gitRevision = spawnSync(
-  'git',
-  ['rev-parse', 'HEAD'],
-  { cwd: root, encoding: 'utf8', windowsHide: true },
-)
+const gitRevision = releasePayloadMode
+  ? undefined
+  : spawnSync(
+      'git',
+      ['rev-parse', 'HEAD'],
+      { cwd: root, encoding: 'utf8', windowsHide: true },
+    )
 const metadata = {
   installedAt: new Date().toISOString(),
-  version: packageMetadata.version,
-  buildCommit: gitRevision.status === 0 ? gitRevision.stdout.trim() : null,
+  version: releaseMetadata?.version ?? packageMetadata.version,
+  buildCommit:
+    releaseMetadata?.commit
+    ?? process.env.GPT_OBSERVATORY_BUILD_COMMIT
+    ?? (gitRevision?.status === 0 ? gitRevision.stdout.trim() : null),
   appDir: currentDir,
   dataDir: canonicalDataDir,
   model: 'Xenova/all-MiniLM-L6-v2',
@@ -205,12 +278,14 @@ try {
     throw new Error('Injected post-start failure for rollback verification.')
   }
 
-  await runRequired(
-    node,
-    [sourceAgentInstall],
-    root,
-    'agent access installation',
-  )
+  if (!skipIntegrations) {
+    await runRequired(
+      node,
+      [sourceAgentInstall],
+      root,
+      'agent access installation',
+    )
+  }
 
   await writeFile(
     join(installHome, 'install.json'),
@@ -259,7 +334,7 @@ async function rollbackAndRestart(cause) {
 
   if (recovery.status !== 0) {
     console.error('Rollback restored files but failed to restart the previous Observatory instance.')
-  } else {
+  } else if (!skipIntegrations) {
     // Best effort: restore global agent surfaces to the recovered current snapshot.
     runCommand(node, [sourceAgentInstall], root)
   }

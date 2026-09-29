@@ -33,6 +33,38 @@ Canonical acceptance is never revoked by a rebuildable projection failure. In pa
 
 Counterexample: two successful polls report `status=running`. This is two observations but one open fact interval. If the second poll creates another fact, TIMELINE fabricates a transition that did not happen.
 
+## Windows release contract
+
+Windows distribution is a packaging layer over the existing installer, not a second installation authority.
+
+```text
+Git tag
+  ↓
+GitHub Actions
+  ↓
+prebuilt payload
+  ├─ compiled dist/server
+  ├─ production node_modules
+  ├─ bundled Node x64 runtime
+  ├─ pinned q8 MiniLM model
+  ├─ payload-manifest.json
+  └─ existing installer/launcher primitives
+        ↓
+Setup.exe / Portable.zip
+        ↓
+%LOCALAPPDATA%\GPTObservatory
+```
+
+Release invariants:
+- release assets contain program/runtime/model state only; canonical `data/observatory` is never packaged;
+- Setup EXE and Portable ZIP invoke the same `install-desktop.mjs` transaction used by source installation;
+- payload SHA-256 verification completes before any target installation mutation;
+- the target machine does not require Git, npm, Node.js, build tools, or runtime model downloads;
+- release-mode installation copies prebuilt production dependencies rather than running npm on the target;
+- only Windows x64 native binaries are retained in the Windows x64 payload;
+- fresh-machine installation must pass from an empty data directory without an existing RocksDB;
+- post-swap startup failure still follows the existing `current → .previous` rollback contract.
+
 ## Supervision identity contract
 
 For Watchdog-supervised work, identity is ordered:

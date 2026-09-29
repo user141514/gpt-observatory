@@ -37,6 +37,14 @@ const url = process.env.OBSERVATORY_URL ?? 'http://127.0.0.1:4317/'
 const appUrl = new URL(url)
 const healthUrl = new URL('/api/health', appUrl).href
 const port = Number(appUrl.port || 4317)
+const startupTimeoutMs = Math.max(
+  10_000,
+  Number(process.env.GPT_OBSERVATORY_START_TIMEOUT_MS ?? 60_000),
+)
+const maxStartAttempts = Math.max(
+  1,
+  Number(process.env.GPT_OBSERVATORY_START_ATTEMPTS ?? 3),
+)
 const runtimeDir = resolve(homeRoot, installedMode ? 'runtime' : '.runtime')
 const pidFile = resolve(runtimeDir, 'server.pid')
 const logFile = resolve(runtimeDir, 'server.log')
@@ -93,40 +101,62 @@ const serverArgs = expectedServerArgs
 
 const stdout = openSync(logFile, 'a')
 const stderr = openSync(errFile, 'a')
-const child = spawn(
-  process.execPath,
-  serverArgs,
-  {
-    cwd: homeRoot,
-    detached: true,
-    windowsHide: true,
-    env: {
-      ...process.env,
-      OBSERVATORY_PORT: process.env.OBSERVATORY_PORT ?? '4317',
-    },
-    stdio: ['ignore', stdout, stderr],
-  },
-)
+let launchAttempts = 0
+let child = await launchServerAttempt()
 
-await writeFile(pidFile, String(child.pid), 'utf8')
-child.unref()
+const startupDeadline = Date.now() + startupTimeoutMs
+while (Date.now() < startupDeadline) {
+  await delay(500)
 
-for (let attempt = 0; attempt < 40; attempt += 1) {
-  await delay(350)
-  if (!(await healthy())) continue
+  if (await healthy()) {
+    const actualPid = discoverServerPid()
+    if (actualPid) {
+      await writeFile(pidFile, String(actualPid), 'utf8')
+      openBrowser(url)
+      process.exit(0)
+    }
+  }
 
-  const actualPid = discoverServerPid()
-  if (!actualPid) continue
-
-  await writeFile(pidFile, String(actualPid), 'utf8')
-  openBrowser(url)
-  process.exit(0)
+  if (
+    child.exitCode !== null
+    && launchAttempts < maxStartAttempts
+    && !discoverServerPid()
+  ) {
+    console.error(
+      `GPT Observatory server exited before readiness; retrying (${launchAttempts + 1}/${maxStartAttempts}).`,
+    )
+    await delay(750)
+    child = await launchServerAttempt()
+  }
 }
 
 console.error('GPT Observatory did not become ready. See:')
 console.error(logFile)
 console.error(errFile)
 process.exit(1)
+
+async function launchServerAttempt() {
+  launchAttempts += 1
+  const launched = spawn(
+    process.execPath,
+    serverArgs,
+    {
+      cwd: homeRoot,
+      detached: true,
+      windowsHide: true,
+      env: {
+        ...process.env,
+        GPT_OBSERVATORY_HOME: homeRoot,
+        OBSERVATORY_PORT: process.env.OBSERVATORY_PORT ?? '4317',
+      },
+      stdio: ['ignore', stdout, stderr],
+    },
+  )
+
+  await writeFile(pidFile, String(launched.pid), 'utf8')
+  launched.unref()
+  return launched
+}
 
 async function healthy() {
   try {

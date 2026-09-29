@@ -15,14 +15,45 @@ The canonical store is embedded SurrealDB. Observations are append-only evidence
 
 ## Install the local app
 
-Development still supports the split Vite/API workflow, but normal use is packaged as one local process: the Node API serves the built frontend from the same `127.0.0.1:4317` origin.
+### Windows: GitHub Release
+
+For a normal Windows machine, use the GitHub Release artifacts. The target machine does **not** need Git, npm, Node.js, a compiler, or a Hugging Face download at runtime.
+
+Preferred:
+
+```text
+GPT-Observatory-Setup-x64.exe
+```
+
+Portable / inspectable alternative:
+
+```text
+GPT-Observatory-Portable-x64.zip
+└─ Install-GPT-Observatory.cmd
+```
+
+Both release forms contain the same verified payload:
+
+- compiled frontend and server;
+- production-only Node dependencies;
+- a bundled Node x64 runtime;
+- the pinned q8 MiniLM model;
+- launcher / rollback logic;
+- CLI and MCP entrypoints;
+- a SHA-256 payload manifest.
+
+The bootstrap verifies the payload manifest **before** creating or mutating the installation. User data is never included in the release package.
+
+### Developer/source installation
+
+Development still supports the split Vite/API workflow. A developer can also install directly from a checkout:
 
 ```bash
 npm install
 npm run app:install
 ```
 
-On Windows this creates an independent local installation:
+Both Release and source installation converge on the same independent local installation:
 
 ```text
 %LOCALAPPDATA%\GPTObservatory\
@@ -43,6 +74,12 @@ It also creates:
 - The user `bin` directory on the Windows User PATH when needed.
 
 The installed app does not depend on the source checkout or its `node_modules`. Development and installed runtimes both use the same stable user-data home, so there is only one default canonical RocksDB. The installer also prepares and SHA-256 verifies a pinned `Xenova/all-MiniLM-L6-v2` q8 model before entering the downtime window; later upgrades reuse that verified local model without network access.
+
+Release upgrades keep canonical data outside the application snapshot, stage the replacement before the downtime window, retain one `.previous` snapshot, and automatically restore that snapshot if post-swap startup fails.
+
+### Watchdog integration on another machine
+
+GPT Observatory and Watchdog have separate ownership. Installing Observatory alone gives you the Fact Explorer, Timeline, Knowledge Graph, Semantic Search, CLI, and MCP access. To populate **Supervised Tasks** on another machine, that machine must also run a compatible Watchdog/Browser Relay and register the tasks it should supervise. Observatory deliberately does not discover arbitrary ChatGPT tabs on its own.
 
 After installation:
 

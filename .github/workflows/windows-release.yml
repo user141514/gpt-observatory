@@ -1,0 +1,115 @@
+name: Windows Release
+
+on:
+  push:
+    branches:
+      - "release-ci-smoke"
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows-release:
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install development dependencies
+        run: npm ci
+
+      - name: Source gates
+        shell: pwsh
+        run: |
+          npm run lint
+          npm test
+          npm run build
+
+      - name: Assemble release payload
+        shell: pwsh
+        run: |
+          $nodeDir = Split-Path (Get-Command node).Source -Parent
+          $env:GPT_OBSERVATORY_NODE_RUNTIME_DIR = $nodeDir
+          $env:GPT_OBSERVATORY_BUILD_COMMIT = "${{ github.sha }}"
+          npm run release:payload
+
+      - name: Package portable ZIP
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path .release\artifacts | Out-Null
+          $payload = (Resolve-Path .release\windows-payload).Path
+          $zip = Join-Path (Resolve-Path .release\artifacts).Path "GPT-Observatory-Portable-x64.zip"
+          Compress-Archive -Path (Join-Path $payload "*") -DestinationPath $zip -CompressionLevel Optimal -Force
+
+      - name: Install Inno Setup compiler
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --no-progress -y
+          }
+          if (-not (Test-Path $iscc)) {
+            throw "Inno Setup compiler was not installed."
+          }
+
+      - name: Build Setup EXE
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          $payload = (Resolve-Path .release\windows-payload).Path
+          $output = (Resolve-Path .release\artifacts).Path
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          & $iscc `
+            "/DPayloadDir=$payload" `
+            "/DOutputDir=$output" `
+            "/DAppVersion=$version" `
+            "release\windows\GPT-Observatory.iss"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Inno Setup failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Write checksums
+        shell: pwsh
+        run: |
+          $artifactDir = (Resolve-Path .release\artifacts).Path
+          $rows = Get-ChildItem $artifactDir -File |
+            Sort-Object Name |
+            ForEach-Object {
+              $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+              "$hash  $($_.Name)"
+            }
+          Set-Content -Path (Join-Path $artifactDir "SHA256SUMS.txt") -Value $rows -Encoding ascii
+          Get-Content (Join-Path $artifactDir "SHA256SUMS.txt")
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpt-observatory-windows-${{ github.sha }}
+          path: .release/artifacts/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" `
+            .release/artifacts/* `
+            --verify-tag `
+            --generate-notes `
+            --title "GPT Observatory ${{ github.ref_name }}"

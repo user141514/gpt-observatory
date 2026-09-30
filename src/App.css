@@ -1496,13 +1496,84 @@
   letter-spacing: 0.08em;
 }
 
-.fact-group-heading > b {
+.fact-group-tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+}
+
+.fact-group-count {
   color: var(--muted-soft);
   font: 7.5px var(--font-mono);
 }
 
+.fact-group-toggle {
+  appearance: none;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--surface) 84%, transparent);
+  font: 9px/1.1 var(--font-mono);
+  cursor: pointer;
+  transition:
+    color 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease,
+    transform 160ms ease;
+}
+
+.fact-group-toggle:hover {
+  color: var(--text);
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.fact-group-toggle:active {
+  transform: translateY(1px);
+}
+
+.fact-group-toggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--text) 28%, transparent);
+  outline-offset: 2px;
+}
+
 .fact-row-list {
   display: grid;
+}
+
+.fact-row-list.is-collapsed {
+  max-height: 440px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted-soft) 52%, transparent) transparent;
+}
+
+.fact-row-list.is-collapsed::-webkit-scrollbar {
+  width: 7px;
+}
+
+.fact-row-list.is-collapsed::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.fact-row-list.is-collapsed::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted-soft) 48%, transparent);
+  background-clip: padding-box;
+}
+
+.fact-row-list.is-collapsed:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--text) 16%, transparent);
+  outline-offset: -2px;
+}
+
+.fact-row-list.is-expanded {
+  overflow: visible;
 }
 
 .fact-row {

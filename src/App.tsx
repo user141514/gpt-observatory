@@ -936,6 +936,12 @@ function groupFacts(entity: CurrentEntity): FactGroupView[] {
 
 function FactGroupSection({ group }: { group: FactGroupView }) {
   const Icon = group.icon
+  const collapsible = group.facts.length > 5
+  const [expanded, setExpanded] = useState(false)
+  const listClassName = collapsible
+    ? `fact-row-list ${expanded ? 'is-expanded' : 'is-collapsed'}`
+    : 'fact-row-list'
+
   return (
     <section className="fact-group">
       <div className="fact-group-heading">
@@ -944,9 +950,25 @@ function FactGroupSection({ group }: { group: FactGroupView }) {
           <strong>{group.zh}</strong>
           <small>{group.en}</small>
         </div>
-        <b>{group.facts.length}</b>
+        <div className="fact-group-tools">
+          <b className="fact-group-count">{group.facts.length}</b>
+          {collapsible && (
+            <button
+              className="fact-group-toggle"
+              type="button"
+              aria-expanded={expanded}
+              onClick={() => setExpanded(value => !value)}
+            >
+              {expanded ? '收起' : '展开全部'}
+            </button>
+          )}
+        </div>
       </div>
-      <div className="fact-row-list">
+      <div
+        className={listClassName}
+        tabIndex={collapsible && !expanded ? 0 : undefined}
+        aria-label={collapsible && !expanded ? `${group.zh}，共 ${group.facts.length} 条，可滚动查看` : undefined}
+      >
         {group.facts.map(fact => <FactRow fact={fact} key={fact.id} />)}
       </div>
     </section>

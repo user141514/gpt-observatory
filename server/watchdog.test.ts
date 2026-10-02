@@ -284,6 +284,10 @@ test('watchdog bridge preserves canonical task identity and keeps tabs runtime-o
     )
     assert.equal(runEdges.length, 1)
     assert.equal(runEdges[0]?.target, conversationB.id)
+    assert.equal(
+      graph.nodes.some(node => node.stableKey === `conversation:${CHAT_A}`),
+      false,
+    )
 
     watches = []
     relay = []
@@ -302,6 +306,14 @@ test('watchdog bridge preserves canonical task identity and keeps tabs runtime-o
     assert.equal(retiredConversationB?.currentFacts.watchdog_bound, false)
 
     graph = await store.graph()
+    assert.equal(
+      graph.nodes.some(node => node.stableKey === 'task:task-alpha'),
+      false,
+    )
+    assert.equal(
+      graph.nodes.some(node => node.stableKey === `conversation:${CHAT_B}`),
+      false,
+    )
     assert.equal(
       graph.edges.some(
         edge => edge.source === taskNode.id && edge.predicate === 'RUNS_IN',

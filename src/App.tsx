@@ -1203,6 +1203,7 @@ function GraphWorkbench({ data }: { data: GraphResponse }) {
   const graphRef = useRef<HTMLDivElement>(null)
   const cyRef = useRef<Core | null>(null)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const [selectedRelationId, setSelectedRelationId] = useState<string | null>(null)
   const [hiddenTypes, setHiddenTypes] = useState<string[]>([])
   const [graphQuery, setGraphQuery] = useState('')
 
@@ -1226,6 +1227,11 @@ function GraphWorkbench({ data }: { data: GraphResponse }) {
     [data.edges, visibleNodeIds],
   )
 
+  const visibleEdgeIds = useMemo(
+    () => new Set(visibleEdges.map(edge => edge.id)),
+    [visibleEdges],
+  )
+
   const degreeByNode = useMemo(() => {
     const degree = new Map<string, number>()
     for (const node of visibleNodes) degree.set(node.id, 0)
@@ -1237,10 +1243,17 @@ function GraphWorkbench({ data }: { data: GraphResponse }) {
   }, [visibleEdges, visibleNodes])
 
   const persistentLabelIds = useMemo(() => {
-    const ranked = [...visibleNodes]
+    const isolatedIds = visibleNodes
+      .filter(node => (degreeByNode.get(node.id) ?? 0) === 0)
+      .map(node => node.id)
+
+    const rankedConnectedIds = visibleNodes
+      .filter(node => (degreeByNode.get(node.id) ?? 0) > 0)
       .sort((a, b) => (degreeByNode.get(b.id) ?? 0) - (degreeByNode.get(a.id) ?? 0))
       .slice(0, Math.min(18, Math.max(6, Math.ceil(visibleNodes.length * 0.12))))
-    return new Set(ranked.map(node => node.id))
+      .map(node => node.id)
+
+    return new Set([...isolatedIds, ...rankedConnectedIds])
   }, [degreeByNode, visibleNodes])
 
   const selectedNode = data.nodes.find(node => node.id === selectedNodeId) ?? null
@@ -1256,6 +1269,11 @@ function GraphWorkbench({ data }: { data: GraphResponse }) {
       }))
   }, [data.edges, data.nodes, selectedNode])
 
+  const selectedRelation = selectedRelations.find(relation => relation.id === selectedRelationId) ?? null
+  const selectedNeighborCount = new Set(
+    selectedRelations.flatMap(relation => relation.peer ? [relation.peer.id] : []),
+  ).size
+
   useEffect(() => {
     if (!graphRef.current || !visibleNodes.length) {
       cyRef.current?.destroy()
@@ -1268,7 +1286,8 @@ function GraphWorkbench({ data }: { data: GraphResponse }) {
       elements: [
         ...visibleNodes.map(node => {
           const degree = degreeByNode.get(node.id) ?? 0
-          const size = Math.max(18, Math.min(38, 18 + Math.sqrt(degree) * 5))
+          const size = Math.max(18, Math.min(32, 18 + Math.sqrt(degree) * 4))
+          const taskNode = node.type === 'task'
           return {
             data: {
               id: node.id,
@@ -1276,7 +1295,9 @@ function GraphWorkbench({ data }: { data: GraphResponse }) {
               fullLabel: node.label,
               type: node.type,
               color: entityColor(node.type),
-              size,
+              borderColor: entityBorderColor(node.type),
+              nodeWidth: taskNode ? size * 1.18 : size,
+              nodeHeight: taskNode ? Math.max(16, size * 0.7) : size,
             },
           }
         }),
@@ -1296,21 +1317,32 @@ function GraphWorkbench({ data }: { data: GraphResponse }) {
           style: {
             label: 'data(label)',
             shape: 'ellipse',
-            width: 'data(size)',
-            height: 'data(size)',
+            width: 'data(nodeWidth)',
+            height: 'data(nodeHeight)',
             'background-color': 'data(color)',
-            'background-opacity': 0.94,
-            'border-color': '#ffffff',
-            'border-width': 2,
-            color: '#4a555f',
-            'font-size': '9.5px',
-            'font-weight': 600,
+            'background-opacity': 0.9,
+            'border-color': 'data(borderColor)',
+            'border-width': 1,
+            color: '#253039',
+            'font-family': 'Inter, "Noto Sans SC", "Microsoft YaHei UI", sans-serif',
+            'font-size': '10px',
+            'font-weight': 560,
+            'text-background-color': '#f7f8f7',
+            'text-background-opacity': 0.74,
+            'text-background-padding': '3px',
+            'text-background-shape': 'roundrectangle',
             'text-wrap': 'ellipsis',
-            'text-max-width': '96px',
+            'text-max-width': '118px',
             'text-valign': 'bottom',
             'text-halign': 'center',
-            'text-margin-y': 7,
+            'text-margin-y': 10,
             'overlay-opacity': 0,
+          },
+        },
+        {
+          selector: 'node[type = "task"]',
+          style: {
+            shape: 'round-rectangle',
           },
         },
         {
@@ -1319,28 +1351,50 @@ function GraphWorkbench({ data }: { data: GraphResponse }) {
             label: 'data(label)',
             'curve-style': 'bezier',
             'target-arrow-shape': 'triangle',
-            'line-color': '#c7cdd2',
-            'target-arrow-color': '#bac1c7',
-            width: 0.8,
-            'font-size': '8px',
-            color: '#77818a',
-            'text-background-color': '#f7f8f6',
-            'text-background-opacity': 0.86,
-            'text-background-padding': '2px',
-            'arrow-scale': 0.55,
-            opacity: 0.68,
+            'line-color': '#7d8992',
+            'target-arrow-color': '#697781',
+            width: 0.95,
+            'font-family': 'Inter, "Noto Sans SC", "Microsoft YaHei UI", sans-serif',
+            'font-size': '8.5px',
+            'font-weight': 560,
+            color: '#48555e',
+            'text-background-color': '#f7f8f7',
+            'text-background-opacity': 0.82,
+            'text-background-padding': '3px',
+            'text-background-shape': 'roundrectangle',
+            'arrow-scale': 0.56,
+            opacity: 0.82,
           },
         },
         {
           selector: '.is-faded',
-          style: { opacity: 0.13, 'text-opacity': 0.12 },
+          style: { opacity: 0.08, 'text-opacity': 0 },
+        },
+        {
+          selector: 'node.is-context',
+          style: {
+            opacity: 0.4,
+            'text-opacity': 0,
+            'border-width': 1.6,
+          },
+        },
+        {
+          selector: 'edge.is-context-relation',
+          style: {
+            width: 0.7,
+            opacity: 0.3,
+            'line-color': '#a5adb3',
+            'target-arrow-color': '#99a3aa',
+            'arrow-scale': 0.44,
+          },
         },
         {
           selector: 'node.is-neighbor',
           style: {
             label: 'data(fullLabel)',
-            'border-color': '#7b8995',
-            'border-width': 2.2,
+            opacity: 1,
+            'border-color': 'data(borderColor)',
+            'border-width': 1.35,
             'text-opacity': 1,
           },
         },
@@ -1348,19 +1402,55 @@ function GraphWorkbench({ data }: { data: GraphResponse }) {
           selector: 'edge.is-active-relation',
           style: {
             label: 'data(fullLabel)',
-            width: 1.4,
-            opacity: 0.95,
-            'line-color': '#8e9aa4',
-            'target-arrow-color': '#7e8b95',
-            'font-size': '8.5px',
+            width: 1.25,
+            opacity: 0.98,
+            'line-color': '#53616b',
+            'target-arrow-color': '#475660',
+            'arrow-scale': 0.62,
+            'font-size': '8.75px',
+            'font-weight': 600,
+            color: '#33424c',
+            'text-background-opacity': 0.9,
+            'text-background-padding': '3.5px',
           },
         },
         {
           selector: 'node.is-focus',
           style: {
             label: 'data(fullLabel)',
-            'border-color': '#344452',
-            'border-width': 3,
+            opacity: 1,
+            'border-color': '#465762',
+            'border-width': 1.55,
+            'underlay-color': '#718796',
+            'underlay-opacity': 0.075,
+            'underlay-padding': 8,
+            'text-opacity': 1,
+            'z-index': 10,
+          },
+        },
+        {
+          selector: 'edge.is-inspected-relation',
+          style: {
+            label: 'data(fullLabel)',
+            width: 1.55,
+            opacity: 1,
+            'line-color': '#42515b',
+            'target-arrow-color': '#35454f',
+            'arrow-scale': 0.67,
+            'text-background-opacity': 1,
+            'text-background-padding': '4px',
+            'z-index': 20,
+          },
+        },
+        {
+          selector: 'node.is-inspected-peer',
+          style: {
+            opacity: 1,
+            'border-color': '#596a76',
+            'border-width': 1.55,
+            'underlay-color': '#8fa8bb',
+            'underlay-opacity': 0.07,
+            'underlay-padding': 5,
             'text-opacity': 1,
           },
         },
@@ -1368,8 +1458,8 @@ function GraphWorkbench({ data }: { data: GraphResponse }) {
           selector: 'node.is-search-match',
           style: {
             label: 'data(fullLabel)',
-            'border-color': '#a38a61',
-            'border-width': 3,
+            'border-color': '#957b52',
+            'border-width': 1.8,
             'text-opacity': 1,
           },
         },
@@ -1378,7 +1468,7 @@ function GraphWorkbench({ data }: { data: GraphResponse }) {
           style: {
             label: 'data(fullLabel)',
             'text-opacity': 1,
-            'border-width': 2.5,
+            'border-width': 1.45,
           },
         },
       ],
@@ -1386,10 +1476,12 @@ function GraphWorkbench({ data }: { data: GraphResponse }) {
         name: 'cose',
         animate: false,
         padding: 86,
-        nodeRepulsion: () => 12000,
-        idealEdgeLength: () => 118,
-        nodeOverlap: 18,
-        gravity: 0.3,
+        nodeDimensionsIncludeLabels: true,
+        nodeRepulsion: () => 15000,
+        idealEdgeLength: () => 126,
+        nodeOverlap: 24,
+        componentSpacing: 72,
+        gravity: 0.28,
         numIter: 1400,
       },
       minZoom: 0.25,
@@ -1399,6 +1491,7 @@ function GraphWorkbench({ data }: { data: GraphResponse }) {
     cy.on('tap', 'node', event => {
       const node = event.target
       const id = node.id()
+      setSelectedRelationId(null)
       setSelectedNodeId(id)
       focusNeighborhood(cy, id)
     })
@@ -1413,6 +1506,7 @@ function GraphWorkbench({ data }: { data: GraphResponse }) {
 
     cy.on('tap', event => {
       if (event.target === cy) {
+        setSelectedRelationId(null)
         setSelectedNodeId(null)
         clearGraphFocus(cy)
       }
@@ -1431,10 +1525,13 @@ function GraphWorkbench({ data }: { data: GraphResponse }) {
     if (!cy) return
     if (selectedNodeId && visibleNodeIds.has(selectedNodeId)) {
       focusNeighborhood(cy, selectedNodeId)
+      if (selectedRelationId && visibleEdgeIds.has(selectedRelationId)) {
+        focusRelation(cy, selectedRelationId)
+      }
     } else {
       clearGraphFocus(cy)
     }
-  }, [selectedNodeId, visibleNodeIds])
+  }, [selectedNodeId, selectedRelationId, visibleEdgeIds, visibleNodeIds])
 
   useEffect(() => {
     const cy = cyRef.current
@@ -1483,6 +1580,7 @@ function GraphWorkbench({ data }: { data: GraphResponse }) {
     ).first()
 
     if (!match || match.empty()) return
+    setSelectedRelationId(null)
     setSelectedNodeId(match.id())
     cy.animate({ center: { eles: match }, zoom: 1.25 }, { duration: 260 })
     focusNeighborhood(cy, match.id())
@@ -1551,9 +1649,9 @@ function GraphWorkbench({ data }: { data: GraphResponse }) {
               <span>色彩语义</span>
               <small>COLOR SEMANTICS</small>
             </div>
-            <Legend color="#aab9c8" zh="工作与对话" en="Work & Conversation" />
-            <Legend color="#aebcab" zh="代码与载体" en="Code & Artifacts" />
-            <Legend color="#c5ad88" zh="执行与实验" en="Runtime & Experiments" />
+            <Legend color="#9eb4c4" zh="对话与项目" en="Conversation & Projects" />
+            <Legend color="#aab9aa" zh="代码与服务" en="Code & Services" />
+            <Legend color="#d0bb93" zh="任务与执行" en="Tasks & Execution" />
           </div>
         </aside>
 
@@ -1579,9 +1677,21 @@ function GraphWorkbench({ data }: { data: GraphResponse }) {
 
           <div className="graph" ref={graphRef} />
 
-          <div className="graph-stage-note">
-            <span>点击节点查看邻接关系，空白处取消聚焦。</span>
-            <small>Click a node to isolate its neighborhood. Click canvas to reset.</small>
+          <div className={selectedNode ? 'graph-stage-note has-focus' : 'graph-stage-note'}>
+            <span>
+              {selectedRelation
+                ? selectedRelation.predicate + ' · ' + (selectedRelation.peer?.label ?? 'Unknown entity')
+                : selectedNode
+                  ? '聚焦 ' + selectedNode.label + ' · ' + selectedRelations.length + ' 条直接关系'
+                  : '点击节点查看邻接关系，空白处取消聚焦。'}
+            </span>
+            <small>
+              {selectedRelation
+                ? 'RELATION TRACE · 在检查器中选择其他关系即可切换'
+                : selectedNode
+                  ? typeLabel(selectedNode.type).en + ' · ' + selectedNeighborCount + ' neighbors · Select a relation in the inspector to trace it.'
+                  : 'Click a node to isolate its neighborhood. Click canvas to reset.'}
+            </small>
           </div>
         </div>
 
@@ -1589,7 +1699,12 @@ function GraphWorkbench({ data }: { data: GraphResponse }) {
           <GraphPanelHeading zh="实体检查器" en="ENTITY INSPECTOR" />
 
           {selectedNode ? (
-            <NodeInspector node={selectedNode} relations={selectedRelations} />
+            <NodeInspector
+              node={selectedNode}
+              relations={selectedRelations}
+              selectedRelationId={selectedRelationId}
+              onRelationSelect={setSelectedRelationId}
+            />
           ) : (
             <div className="inspector-empty">
               <CircleHelp size={28} strokeWidth={1.45} />
@@ -1614,9 +1729,13 @@ function GraphPanelHeading({ zh, en }: { zh: string; en: string }) {
 function NodeInspector({
   node,
   relations,
+  selectedRelationId,
+  onRelationSelect,
 }: {
   node: GraphNode
   relations: Array<GraphResponse['edges'][number] & { direction: 'in' | 'out'; peer?: GraphNode }>
+  selectedRelationId: string | null
+  onRelationSelect: (relationId: string | null) => void
 }) {
   return (
     <div className="inspector-content">
@@ -1643,7 +1762,15 @@ function NodeInspector({
         {relations.length ? (
           <div className="relation-list">
             {relations.map(relation => (
-              <div key={relation.id}>
+              <button
+                type="button"
+                className={relation.id === selectedRelationId ? 'relation-item active' : 'relation-item'}
+                aria-pressed={relation.id === selectedRelationId}
+                onClick={() => onRelationSelect(
+                  relation.id === selectedRelationId ? null : relation.id,
+                )}
+                key={relation.id}
+              >
                 <span className={relation.direction === 'out' ? 'relation-direction out' : 'relation-direction in'}>
                   {relation.direction === 'out'
                     ? <ArrowRight size={12} />
@@ -1653,7 +1780,7 @@ function NodeInspector({
                   <strong>{relation.predicate}</strong>
                   <span>{relation.peer?.label ?? 'Unknown entity'}</span>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         ) : <p className="quiet-copy">暂无当前关系 / No current relations.</p>}
@@ -1783,22 +1910,55 @@ function focusNeighborhood(cy: Core, nodeId: string) {
   if (!node || node.empty()) return
 
   const connectedEdges = node.connectedEdges()
-  const neighborNodes = connectedEdges.connectedNodes()
+  const neighborNodes = connectedEdges.connectedNodes().difference(node)
+  const contextNodes = neighborNodes
+    .neighborhood()
+    .nodes()
+    .difference(node)
+    .difference(neighborNodes)
+  const contextEdges = neighborNodes.edgesWith(contextNodes)
+
   cy.elements().addClass('is-faded')
-  node.removeClass('is-faded').addClass('is-focus')
+  contextNodes.removeClass('is-faded').addClass('is-context')
+  contextEdges.removeClass('is-faded').addClass('is-context-relation')
   neighborNodes.removeClass('is-faded').addClass('is-neighbor')
   connectedEdges.removeClass('is-faded').addClass('is-active-relation')
+  node.removeClass('is-faded').addClass('is-focus')
+}
+
+function focusRelation(cy: Core, relationId: string) {
+  const relation = cy.getElementById(relationId)
+  if (!relation || relation.empty()) return
+
+  relation.addClass('is-inspected-relation')
+  relation.connectedNodes()
+    .filter(node => !node.hasClass('is-focus'))
+    .addClass('is-inspected-peer')
 }
 
 function clearGraphFocus(cy: Core) {
-  cy.elements().removeClass('is-faded is-neighbor is-focus is-active-relation')
+  cy.elements().removeClass(
+    'is-faded is-context is-context-relation is-neighbor is-focus is-active-relation '
+      + 'is-inspected-relation is-inspected-peer',
+  )
 }
 
 function entityColor(type: string) {
-  if (['task', 'conversation', 'project', 'agent_session'].includes(type)) return '#aab9c8'
-  if (['repo', 'branch', 'worktree', 'file', 'artifact'].includes(type)) return '#aebcab'
-  if (['agent', 'host', 'process', 'experiment', 'run'].includes(type)) return '#c5ad88'
-  return '#b9bec2'
+  if (type === 'conversation') return '#9eb4c4'
+  if (type === 'task') return '#d0bb93'
+  if (['project', 'agent_session'].includes(type)) return '#a9bbc7'
+  if (['repo', 'branch', 'worktree', 'file', 'artifact', 'service'].includes(type)) return '#aab9aa'
+  if (['agent', 'host', 'process', 'experiment', 'run'].includes(type)) return '#c8b38e'
+  return '#b7bec2'
+}
+
+function entityBorderColor(type: string) {
+  if (type === 'conversation') return '#839aaa'
+  if (type === 'task') return '#ad9365'
+  if (['project', 'agent_session'].includes(type)) return '#8fa2ae'
+  if (['repo', 'branch', 'worktree', 'file', 'artifact', 'service'].includes(type)) return '#90a190'
+  if (['agent', 'host', 'process', 'experiment', 'run'].includes(type)) return '#aa9268'
+  return '#98a3a9'
 }
 
 function typeLabel(type: string): { zh: string; en: string } {

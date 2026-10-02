@@ -2164,18 +2164,24 @@
   display: grid;
   grid-template-columns: 208px minmax(0, 1fr) 292px;
   min-height: 720px;
-  border: 1px solid var(--border);
+  border: 1px solid rgba(77, 87, 93, 0.1);
   border-radius: var(--radius-xl);
-  background: var(--surface-1);
-  box-shadow: var(--shadow-3);
+  background: rgba(249, 250, 249, 0.72);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 18px 46px rgba(32, 40, 44, 0.065);
   overflow: hidden;
+  backdrop-filter: blur(22px) saturate(108%);
+  -webkit-backdrop-filter: blur(22px) saturate(108%);
 }
 
 .graph-sidebar,
 .graph-inspector {
   min-width: 0;
   padding: 18px;
-  background: var(--surface-2);
+  background: rgba(247, 248, 247, 0.66);
+  backdrop-filter: blur(20px) saturate(108%);
+  -webkit-backdrop-filter: blur(20px) saturate(108%);
 }
 
 .graph-sidebar {
@@ -2229,13 +2235,16 @@
   min-width: 0;
   min-height: 37px;
   padding: 0 9px;
-  border: 1px solid var(--border);
+  border: 1px solid rgba(77, 87, 93, 0.11);
   border-right: 0;
   border-radius: 9px 0 0 9px;
   color: var(--text);
-  background: var(--surface);
+  background: rgba(255, 255, 255, 0.46);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.66);
   font-size: 9.5px;
   outline: 0;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
 }
 
 .graph-search button {
@@ -2291,9 +2300,13 @@
 
 .graph-filter.active {
   opacity: 1;
-  border-color: var(--border-soft);
-  background: var(--surface);
-  box-shadow: var(--shadow-1);
+  border-color: rgba(77, 87, 93, 0.08);
+  background: rgba(255, 255, 255, 0.42);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 5px 14px rgba(32, 40, 44, 0.035);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 .graph-filter > i {
@@ -2350,9 +2363,14 @@
   min-width: 0;
   min-height: 720px;
   background:
-    linear-gradient(rgba(250, 251, 249, 0.93), rgba(250, 251, 249, 0.93)),
-    repeating-linear-gradient(0deg, transparent 0 39px, rgba(73, 86, 94, 0.028) 39px 40px),
-    repeating-linear-gradient(90deg, transparent 0 39px, rgba(73, 86, 94, 0.028) 39px 40px);
+    radial-gradient(circle at 14% 8%, rgba(143, 168, 187, 0.07), transparent 32%),
+    radial-gradient(circle at 84% 88%, rgba(170, 185, 170, 0.055), transparent 30%),
+    linear-gradient(rgba(246, 247, 246, 0.955), rgba(246, 247, 246, 0.955)),
+    radial-gradient(circle at 1px 1px, rgba(43, 54, 61, 0.105) 0.5px, transparent 0.72px);
+  background-size: auto, auto, auto, 7px 7px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    inset 0 0 0 1px rgba(62, 74, 82, 0.035);
 }
 
 .graph-toolbar {
@@ -2371,11 +2389,14 @@
   display: grid;
   gap: 1px;
   padding: 7px 10px;
-  border: 1px solid var(--border-soft);
+  border: 1px solid rgba(77, 87, 93, 0.08);
   border-radius: 11px;
-  background: rgba(250, 251, 249, 0.84);
-  box-shadow: var(--shadow-1);
-  backdrop-filter: blur(12px);
+  background: rgba(248, 249, 248, 0.68);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.66),
+    0 7px 22px rgba(35, 44, 50, 0.055);
+  backdrop-filter: blur(18px) saturate(112%);
+  -webkit-backdrop-filter: blur(18px) saturate(112%);
 }
 
 .graph-toolbar-copy span {
@@ -2394,13 +2415,25 @@
 .graph-controls {
   display: flex;
   gap: 5px;
+  padding: 3px;
+  border: 1px solid rgba(77, 87, 93, 0.065);
+  border-radius: 13px;
+  background: rgba(248, 249, 248, 0.58);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 7px 22px rgba(35, 44, 50, 0.045);
   pointer-events: auto;
+  backdrop-filter: blur(18px) saturate(110%);
+  -webkit-backdrop-filter: blur(18px) saturate(110%);
 }
 
 .graph-controls button {
   min-width: 34px;
   height: 34px;
+  border-color: transparent;
   border-radius: 10px;
+  background: rgba(255, 255, 255, 0.34);
+  box-shadow: none;
   font-size: 15px;
 }
 
@@ -2428,25 +2461,36 @@
   left: 16px;
   bottom: 14px;
   display: grid;
-  gap: 1px;
-  max-width: 430px;
-  padding: 7px 10px;
-  border: 1px solid var(--border-soft);
+  gap: 2px;
+  max-width: 520px;
+  padding: 8px 11px;
+  border: 1px solid rgba(77, 87, 93, 0.07);
   border-radius: 10px;
-  background: rgba(250, 251, 249, 0.82);
-  box-shadow: var(--shadow-1);
+  background: rgba(248, 249, 248, 0.66);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 7px 20px rgba(35, 44, 50, 0.045);
   color: var(--muted);
   pointer-events: none;
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(16px) saturate(108%);
+  -webkit-backdrop-filter: blur(16px) saturate(108%);
+}
+
+.graph-stage-note.has-focus {
+  border-color: rgba(78, 91, 100, 0.13);
+  background: rgba(248, 249, 248, 0.76);
 }
 
 .graph-stage-note span {
+  color: var(--text);
   font-size: 8.5px;
+  font-weight: 600;
 }
 
 .graph-stage-note small {
   color: var(--muted-soft);
   font-size: 7px;
+  line-height: 1.45;
 }
 
 .inspector-empty {
@@ -2559,15 +2603,41 @@
   margin-top: 9px;
 }
 
-.relation-list > div {
+.relation-item {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr);
   gap: 8px;
   align-items: center;
+  width: 100%;
   padding: 7px 8px;
-  border: 1px solid var(--border-soft);
+  border: 1px solid rgba(77, 87, 93, 0.075);
   border-radius: 9px;
-  background: var(--surface);
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.4);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.62);
+  text-align: left;
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition:
+    border-color 150ms ease,
+    background 150ms ease,
+    box-shadow 150ms ease,
+    transform 150ms ease;
+}
+
+.relation-item:hover {
+  transform: translateY(-1px);
+  border-color: rgba(78, 91, 100, 0.18);
+  box-shadow: var(--shadow-1);
+}
+
+.relation-item.active {
+  border-color: rgba(89, 106, 118, 0.28);
+  background: color-mix(in srgb, var(--surface) 90%, var(--accent-blue));
+  box-shadow:
+    inset 2px 0 0 rgba(89, 106, 118, 0.55),
+    var(--shadow-1);
 }
 
 .relation-direction {
@@ -2589,18 +2659,27 @@
   color: #687b68;
 }
 
-.relation-list > div > div {
+.relation-item > div {
   display: grid;
   gap: 2px;
 }
 
-.relation-list strong {
+.relation-item strong {
   font-size: 8.5px;
+  font-weight: 650;
 }
 
-.relation-list span {
+.relation-item span {
   color: var(--muted);
   font-size: 8px;
+}
+
+.relation-item.active strong {
+  color: var(--text-strong);
+}
+
+.relation-item.active > div > span {
+  color: var(--muted);
 }
 
 .quiet-copy,

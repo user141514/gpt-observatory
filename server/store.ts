@@ -588,7 +588,15 @@ export function createStore(db: ObservatoryDb) {
     nodes: Array<Record<string, unknown>>
     edges: Array<Record<string, unknown>>
   }> {
-    const entities = await currentEntities()
+    const entities = (await currentEntities()).filter((entity) => {
+      if (entity.type === 'task') {
+        return entity.currentFacts.watchdog_registered === true
+      }
+      if (entity.type === 'conversation') {
+        return entity.currentFacts.watchdog_bound === true
+      }
+      return true
+    })
     const relationRows = rows(
       await db.query(
         'SELECT * FROM relation WHERE valid_to IS NONE ORDER BY valid_from DESC',

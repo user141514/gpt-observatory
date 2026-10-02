@@ -79,14 +79,29 @@ export interface PromptUpdateInput {
   updatedBy?: string
 }
 
-export interface WatchdogRegisterResult {
+export interface RegistryConfirmation {
+  confirmed: true
+  confirmedAt: string
+  operationId: string
+  snapshot: SupervisedTasksResponse
+}
+
+export interface WatchdogRegisterResult extends RegistryConfirmation {
   conversationId: string
   created: boolean
 }
 
-export interface WatchdogUnregisterResult {
+export interface WatchdogUnregisterResult extends RegistryConfirmation {
   conversationId: string
   removed: boolean
+}
+
+export interface RegistrationProvenance {
+  source: string
+  actor: string
+  operationId: string
+  reason: string
+  at?: string
 }
 
 export interface SupervisedTask {
@@ -110,6 +125,7 @@ export interface SupervisedTask {
     url?: string
   }
   registeredAt?: string
+  lastRegistration?: RegistrationProvenance
   bindingChangedAt?: string
   lastPollAt?: string
   lastSuccessAt?: string

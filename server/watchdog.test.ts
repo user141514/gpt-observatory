@@ -93,6 +93,11 @@ test('watchdog bridge preserves canonical task identity and keeps tabs runtime-o
         last_success_at: 1_790_000_100,
         consecutive_failures: 0,
         last_error: null,
+        diagnostics: { sidecar_tab: {
+          id: 'PAGE_A',
+          title: 'Research Factory',
+          url: `https://chatgpt.com/c/${CHAT_A}`,
+        } },
         prompt: {
           task_id: 'task-alpha',
           version: 2,
@@ -104,26 +109,11 @@ test('watchdog bridge preserves canonical task identity and keeps tabs runtime-o
       },
     ]
 
-    let relay = [
-      {
-        id: 'PAGE_A',
-        type: 'page',
-        title: 'Research Factory',
-        url: `https://chatgpt.com/c/${CHAT_A}`,
-      },
-      {
-        id: 'IGNORED',
-        type: 'page',
-        title: 'Unregistered ChatGPT',
-        url: 'https://chatgpt.com/c/8cc542fd-708c-83ea-869a-721efd83d7f5',
-      },
-    ]
-
     const fetchImpl: typeof fetch = async input => {
       const url = String(input)
       if (url.endsWith('/health')) return jsonResponse(health)
       if (url.endsWith('/watches')) return jsonResponse({ watches })
-      if (url.endsWith('/json/list')) return jsonResponse(relay)
+      if (url.endsWith('/json/list')) throw new Error('normal observation must not request Relay')
       return new Response('not found', { status: 404 })
     }
 
@@ -203,24 +193,21 @@ test('watchdog bridge preserves canonical task identity and keeps tabs runtime-o
       'browser tab bindings must never enter the current factual graph',
     )
 
-    const relayFailingFetch: typeof fetch = async input => {
+    const sidecarUnknownFetch: typeof fetch = async input => {
       const url = String(input)
-      if (url.endsWith('/json/list')) {
-        return new Response('relay unavailable', {
-          status: 503,
-          statusText: 'Unavailable',
-        })
+      if (url.endsWith('/watches')) {
+        return jsonResponse({ watches: watches.map(watch => ({ ...watch, diagnostics: null })) })
       }
       return fetchImpl(input)
     }
-    const relayUnknownBridge = createWatchdogBridge(store, {
-      fetchImpl: relayFailingFetch,
+    const sidecarUnknownBridge = createWatchdogBridge(store, {
+      fetchImpl: sidecarUnknownFetch,
       now: () => new Date('2026-09-28T11:01:00.000Z'),
     })
-    const relayUnknown = await relayUnknownBridge.sync()
-    assert.equal(relayUnknown.integration.available, true)
-    assert.equal(relayUnknown.integration.ready, true)
-    assert.equal(relayUnknown.tasks[0]?.runtimeTabState, 'unknown')
+    const sidecarUnknown = await sidecarUnknownBridge.sync()
+    assert.equal(sidecarUnknown.integration.available, true)
+    assert.equal(sidecarUnknown.integration.ready, true)
+    assert.equal(sidecarUnknown.tasks[0]?.runtimeTabState, 'unknown')
 
     health = {
       ...health,
@@ -247,14 +234,11 @@ test('watchdog bridge preserves canonical task identity and keeps tabs runtime-o
         last_success_at: 1_790_000_220,
       },
     ]
-    relay = [
-      {
-        id: 'PAGE_B',
-        type: 'page',
-        title: 'Research Factory – continued',
-        url: `https://chatgpt.com/c/${CHAT_B}`,
-      },
-    ]
+    watches[0]!.diagnostics = { sidecar_tab: {
+      id: 'PAGE_B',
+      title: 'Research Factory – continued',
+      url: `https://chatgpt.com/c/${CHAT_B}`,
+    } }
 
     const second = await bridge.sync()
     assert.equal(second.tasks.length, 1)
@@ -290,7 +274,6 @@ test('watchdog bridge preserves canonical task identity and keeps tabs runtime-o
     )
 
     watches = []
-    relay = []
     const third = await bridge.sync()
     assert.equal(third.tasks.length, 0)
 
@@ -354,6 +337,11 @@ test('watchdog bridge registers and unregisters through authoritative registry',
       if (url.endsWith('/register') && init?.method === 'POST') {
         const body = JSON.parse(String(init.body)) as Record<string, unknown>
         assert.equal(body.url, targetUrl)
+        assert.equal(body.explicit, true)
+        assert.equal(body.source, 'observatory-ui')
+        assert.equal(body.actor, 'human')
+        assert.equal(body.reason, 'manual-bind')
+        assert.equal(body.operation_id, '832e8244-0489-4f17-8247-bfa2c2f941ed')
         watches = [{
           conversation_id: CHAT_A,
           target_url: targetUrl,
@@ -370,6 +358,10 @@ test('watchdog bridge registers and unregisters through authoritative registry',
       if (url.endsWith('/unregister') && init?.method === 'POST') {
         const body = JSON.parse(String(init.body)) as Record<string, unknown>
         assert.equal(body.conversation_id, CHAT_A)
+        assert.equal(body.source, 'observatory-ui')
+        assert.equal(body.actor, 'human')
+        assert.equal(body.reason, 'manual-unbind')
+        assert.equal(body.operation_id, '4a39b06a-54f5-4a0b-af79-35bdfcd08144')
         watches = []
         return jsonResponse({ conversation_id: CHAT_A, removed: true })
       }
@@ -381,13 +373,29 @@ test('watchdog bridge registers and unregisters through authoritative registry',
       now: () => new Date('2026-10-02T12:30:00.000Z'),
     })
 
-    const registered = await bridge.register(targetUrl)
-    assert.deepEqual(registered, { conversationId: CHAT_A, created: true })
+    const registered = await bridge.register(targetUrl, '832e8244-0489-4f17-8247-bfa2c2f941ed')
+    const { snapshot: registeredSnapshot, ...registeredReceipt } = registered
+    assert.equal(registeredSnapshot.tasks[0]?.currentConversation.id, CHAT_A)
+    assert.deepEqual(registeredReceipt, {
+      conversationId: CHAT_A,
+      created: true,
+      confirmed: true,
+      confirmedAt: '2026-10-02T12:30:00.000Z',
+      operationId: '832e8244-0489-4f17-8247-bfa2c2f941ed',
+    })
     assert.equal(bridge.current().tasks.length, 1)
     assert.equal(bridge.current().tasks[0]?.currentConversation.id, CHAT_A)
 
-    const unregistered = await bridge.unregister(CHAT_A)
-    assert.deepEqual(unregistered, { conversationId: CHAT_A, removed: true })
+    const unregistered = await bridge.unregister(CHAT_A, '4a39b06a-54f5-4a0b-af79-35bdfcd08144')
+    const { snapshot: unregisteredSnapshot, ...unregisteredReceipt } = unregistered
+    assert.equal(unregisteredSnapshot.tasks.length, 0)
+    assert.deepEqual(unregisteredReceipt, {
+      conversationId: CHAT_A,
+      removed: true,
+      confirmed: true,
+      confirmedAt: '2026-10-02T12:30:00.000Z',
+      operationId: '4a39b06a-54f5-4a0b-af79-35bdfcd08144',
+    })
     assert.equal(bridge.current().tasks.length, 0)
   } finally {
     await db.close()
@@ -703,6 +711,197 @@ test('watchdog prompt proxy uses CAS and refreshes projection', async () => {
     await db.close()
   }
 })
+
+test('active registry uses Sidecar diagnostics and provenance without requesting Relay', async () => {
+  const db = await createDatabase('mem://')
+  try {
+    let relayRequests = 0
+    let watch: WatchdogWatch = {
+      conversation_id: CHAT_A,
+      target_url: `https://chatgpt.com/c/${CHAT_A}`,
+      state: 'waiting',
+      connected: true,
+      last_registration: {
+        source: 'observatory-ui',
+        actor: 'human',
+        operation_id: '832e8244-0489-4f17-8247-bfa2c2f941ed',
+        reason: 'manual-bind',
+        at: 1_790_000_000,
+      },
+      diagnostics: {
+        sidecar_tab: { id: 'TAB_A', title: 'Observed by Sidecar', url: `https://chatgpt.com/c/${CHAT_A}` },
+      },
+    }
+    const fetchImpl: typeof fetch = async input => {
+      const url = String(input)
+      if (url.endsWith('/health')) return jsonResponse({ protocol_version: 2 })
+      if (url.endsWith('/watches')) return jsonResponse({ watches: [watch] })
+      if (url.endsWith('/json/list')) {
+        relayRequests += 1
+        return jsonResponse([])
+      }
+      return new Response('not found', { status: 404 })
+    }
+    const bridge = createWatchdogBridge(createStore(db), { fetchImpl })
+    const observed = await bridge.sync()
+    assert.equal(observed.tasks[0]?.runtimeTabState, 'present')
+    assert.equal(observed.tasks[0]?.runtimeTab?.id, 'TAB_A')
+    assert.equal(observed.tasks[0]?.runtimeTab?.title, 'Observed by Sidecar')
+    assert.deepEqual(observed.tasks[0]?.lastRegistration, {
+      source: 'observatory-ui',
+      actor: 'human',
+      operationId: '832e8244-0489-4f17-8247-bfa2c2f941ed',
+      reason: 'manual-bind',
+      at: new Date(1_790_000_000 * 1000).toISOString(),
+    })
+    const entities = await createStore(db).currentEntities()
+    assert.equal(
+      entities.find(entity => entity.stableKey === `task:${CHAT_A}`)?.currentFacts.watchdog_registration_source,
+      'observatory-ui',
+    )
+
+    watch = { ...watch, diagnostics: null, last_registration: undefined }
+    const unknown = await bridge.sync()
+    assert.equal(unknown.tasks[0]?.runtimeTabState, 'unknown')
+    assert.equal(unknown.tasks[0]?.lastRegistration, undefined)
+
+    watch = { ...watch, diagnostics: {
+      sidecar_tab: { id: 'WRONG_TAB', url: `https://chatgpt.com/c/${CHAT_B}` },
+    } }
+    assert.equal((await bridge.sync()).tasks[0]?.runtimeTabState, 'unknown')
+    assert.equal(relayRequests, 0)
+  } finally {
+    await db.close()
+  }
+})
+
+for (const action of ['register', 'unregister'] as const) {
+  test(`${action} confirmation waits for a new snapshot after any pre-mutation inFlight sync`, async () => {
+    const db = await createDatabase('mem://')
+    let releaseSnapshot!: (response: Response) => void
+    let snapshotStarted!: () => void
+    const started = new Promise<void>(resolve => { snapshotStarted = resolve })
+    const staleSnapshot = new Promise<Response>(resolve => { releaseSnapshot = resolve })
+    let mutationAcknowledged!: () => void
+    const acknowledged = new Promise<void>(resolve => { mutationAcknowledged = resolve })
+    try {
+      const watch: WatchdogWatch = {
+        conversation_id: CHAT_A,
+        target_url: `https://chatgpt.com/c/${CHAT_A}`,
+        state: 'waiting',
+        connected: true,
+      }
+      const before = action === 'register' ? [] : [watch]
+      const after = action === 'register' ? [watch] : []
+      let watchesReads = 0
+      const fetchImpl: typeof fetch = async (input, init) => {
+        const url = String(input)
+        if (url.endsWith('/health')) return jsonResponse({ protocol_version: 2 })
+        if (url.endsWith('/watches')) {
+          watchesReads += 1
+          if (watchesReads === 1) {
+            snapshotStarted()
+            return staleSnapshot
+          }
+          return jsonResponse({ watches: after })
+        }
+        if (url.endsWith(`/${action}`) && init?.method === 'POST') {
+          mutationAcknowledged()
+          return jsonResponse({ conversation_id: CHAT_A, created: true, removed: true })
+        }
+        return jsonResponse([])
+      }
+      const bridge = createWatchdogBridge(createStore(db), { fetchImpl })
+      const oldSync = bridge.sync()
+      await started
+      const mutation = action === 'register'
+        ? bridge.register(watch.target_url)
+        : bridge.unregister(CHAT_A)
+      await acknowledged
+      releaseSnapshot(jsonResponse({ watches: before }))
+      await oldSync
+      const result = await mutation
+      assert.equal(result.confirmed, true)
+      assert.equal(watchesReads, 2, 'confirmation must read the registry after the mutation')
+      assert.equal(bridge.current().tasks.some(task => task.currentConversation.id === CHAT_A), action === 'register')
+    } finally {
+      await db.close()
+    }
+  })
+
+  for (const confirmation of ['unavailable', 'unchanged', 'malformed'] as const) {
+    test(`${action} never reports confirmed success when registry confirmation is ${confirmation}`, async () => {
+      const db = await createDatabase('mem://')
+      try {
+        const watch: WatchdogWatch = {
+          conversation_id: CHAT_A,
+          target_url: `https://chatgpt.com/c/${CHAT_A}`,
+          state: 'waiting',
+          connected: true,
+        }
+        const fetchImpl: typeof fetch = async (input, init) => {
+          const url = String(input)
+          if (url.endsWith('/health')) return jsonResponse({ protocol_version: 2 })
+          if (url.endsWith('/watches')) {
+            if (confirmation === 'unavailable') return new Response('offline', { status: 503 })
+            if (confirmation === 'malformed') return jsonResponse({ unexpected: [] })
+            return jsonResponse({ watches: action === 'register' ? [] : [watch] })
+          }
+          if (url.endsWith(`/${action}`) && init?.method === 'POST') {
+            return jsonResponse({ conversation_id: CHAT_A, created: true, removed: true })
+          }
+          return jsonResponse([])
+        }
+        const bridge = createWatchdogBridge(createStore(db), { fetchImpl })
+        await assert.rejects(
+          action === 'register' ? bridge.register(watch.target_url) : bridge.unregister(CHAT_A),
+          (error: unknown) => error instanceof WatchdogRequestError
+            && (error.body as { error?: string }).error === 'registry_confirmation_unknown',
+        )
+      } finally {
+        await db.close()
+      }
+    })
+  }
+}
+
+for (const action of ['register', 'unregister'] as const) {
+  for (const mismatch of ['conversation', 'operation', 'invalid_receipt'] as const) {
+    test(`${action} rejects a mismatched or malformed mutation receipt: ${mismatch}`, async () => {
+      const db = await createDatabase('mem://')
+      try {
+        const fetchImpl: typeof fetch = async (input, init) => {
+          const url = String(input)
+          if (url.endsWith(`/${action}`) && init?.method === 'POST') {
+            const body = JSON.parse(String(init.body)) as { operation_id: string }
+            return jsonResponse({
+              conversation_id: mismatch === 'conversation' ? CHAT_B : CHAT_A,
+              operation_id: mismatch === 'operation' ? 'another-operation' : body.operation_id,
+              created: mismatch === 'invalid_receipt' ? 'yes' : true,
+              removed: mismatch === 'invalid_receipt' ? 'yes' : true,
+            })
+          }
+          if (url.endsWith('/health')) return jsonResponse({ protocol_version: 2 })
+          if (url.endsWith('/watches')) return jsonResponse({ watches: action === 'register' ? [{
+            conversation_id: CHAT_A,
+            target_url: `https://chatgpt.com/c/${CHAT_A}`,
+            state: 'waiting',
+            connected: true,
+          }] : [] })
+          return jsonResponse([])
+        }
+        const bridge = createWatchdogBridge(createStore(db), { fetchImpl })
+        await assert.rejects(
+          action === 'register' ? bridge.register(`https://chatgpt.com/c/${CHAT_A}`) : bridge.unregister(CHAT_A),
+          (error: unknown) => error instanceof WatchdogRequestError
+            && (error.body as { error?: string }).error === 'registry_confirmation_unknown',
+        )
+      } finally {
+        await db.close()
+      }
+    })
+  }
+}
 
 function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {

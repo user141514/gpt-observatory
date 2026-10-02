@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   ObservationAuthorityError,
+  assertExternalObservationAuthority,
   observeExternalWithSemanticProjection,
   observeWithSemanticProjection,
 } from './observe-service.js'
@@ -104,6 +105,26 @@ test('external observation cannot close a Watchdog prompt interval via coverage 
   )
 
   assert.equal(observeCalls, 0)
+})
+
+test('external observations cannot forge or clear Watchdog registration provenance', () => {
+  for (const attribute of [
+    'watchdog_registration_source',
+    'watchdog_registration_actor',
+    'watchdog_registration_operation_id',
+    'watchdog_registration_reason',
+    'watchdog_registration_at',
+  ]) {
+    assert.throws(() => assertExternalObservationAuthority({
+      ...input,
+      facts: { [attribute]: 'spoofed' },
+    }), ObservationAuthorityError)
+    assert.throws(() => assertExternalObservationAuthority({
+      ...input,
+      coverage: [attribute],
+      facts: {},
+    }), ObservationAuthorityError)
+  }
 })
 
 test('semantic projection failure cannot revoke an accepted canonical observation', async () => {

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type {
   CurrentEntity,
   EntityInput,
@@ -46,14 +47,29 @@ export interface PromptUpdateInput {
   updatedBy?: string
 }
 
-export interface WatchdogRegisterResult {
+export interface RegistryConfirmation {
+  confirmed: true
+  confirmedAt: string
+  operationId: string
+  snapshot: SupervisedTasksProjection
+}
+
+export interface WatchdogRegisterResult extends RegistryConfirmation {
   conversationId: string
   created: boolean
 }
 
-export interface WatchdogUnregisterResult {
+export interface WatchdogUnregisterResult extends RegistryConfirmation {
   conversationId: string
   removed: boolean
+}
+
+export interface RegistrationProvenance {
+  source: string
+  actor: string
+  operationId: string
+  reason: string
+  at?: string
 }
 
 export class WatchdogRequestError extends Error {
@@ -82,13 +98,13 @@ export interface WatchdogWatch {
   last_error?: string | null
   diagnostics?: Record<string, unknown> | null
   prompt?: WatchdogPromptState | null
-}
-
-export interface RelayTarget {
-  id: string
-  type: string
-  title?: string
-  url?: string
+  last_registration?: {
+    source: string
+    actor: string
+    operation_id: string
+    reason: string
+    at?: number | null
+  } | null
 }
 
 export interface SupervisedTaskView {
@@ -112,6 +128,7 @@ export interface SupervisedTaskView {
     url?: string
   }
   registeredAt?: string
+  lastRegistration?: RegistrationProvenance
   bindingChangedAt?: string
   lastPollAt?: string
   lastSuccessAt?: string
@@ -201,21 +218,23 @@ export function createWatchdogBridge(
         fetchJson<{ watches: WatchdogWatch[] }>(fetchImpl, `${watchdogUrl}/watches`),
       ])
 
-      const watches = Array.isArray(watchesPayload.watches) ? watchesPayload.watches : []
+      if (!watchesPayload || !Array.isArray(watchesPayload.watches)) {
+        throw new Error('Invalid Watchdog /watches snapshot: watches array is required.')
+      }
+      const watches = watchesPayload.watches
+      if (watches.some(watch => !watch
+        || typeof watch.conversation_id !== 'string'
+        || !watch.conversation_id
+        || typeof watch.target_url !== 'string'
+        || exactConversationId(watch.target_url) !== watch.conversation_id
+        || typeof watch.state !== 'string'
+        || typeof watch.connected !== 'boolean')) {
+        throw new Error('Invalid Watchdog /watches snapshot: malformed watch.')
+      }
       const integrationReady = Boolean(health.ready) && Boolean(health.polling_fresh)
       const promptAvailable =
         typeof health.protocol_version === 'number'
         && health.protocol_version >= 4
-
-      let relayTargets: RelayTarget[] | undefined = []
-      if (watches.length > 0) {
-        try {
-          const relayPayload = await fetchJson<unknown>(fetchImpl, `${relayUrl}/json/list`)
-          relayTargets = Array.isArray(relayPayload) ? relayPayload as RelayTarget[] : []
-        } catch {
-          relayTargets = undefined
-        }
-      }
 
       await store.observe({
         source: WATCHDOG_SOURCE,
@@ -339,6 +358,7 @@ export function createWatchdogBridge(
         const prompt = promptAvailable
           ? normalizePrompt(watch.prompt, taskId)
           : undefined
+        const lastRegistration = normalizeRegistration(watch.last_registration)
         const taskCoverage = [
           'watchdog_registered',
           'watchdog_state',
@@ -352,6 +372,11 @@ export function createWatchdogBridge(
           'watchdog_registered_at',
           'binding_changed_at',
           'task_identity_source',
+          'watchdog_registration_source',
+          'watchdog_registration_actor',
+          'watchdog_registration_operation_id',
+          'watchdog_registration_reason',
+          'watchdog_registration_at',
         ]
         const taskFacts: Record<string, unknown> = {
           watchdog_registered: true,
@@ -366,6 +391,11 @@ export function createWatchdogBridge(
           watchdog_registered_at: epochSecondsIso(watch.registered_at),
           binding_changed_at: epochSecondsIso(watch.binding_changed_at),
           task_identity_source: identitySource,
+          watchdog_registration_source: lastRegistration?.source ?? null,
+          watchdog_registration_actor: lastRegistration?.actor ?? null,
+          watchdog_registration_operation_id: lastRegistration?.operationId ?? null,
+          watchdog_registration_reason: lastRegistration?.reason ?? null,
+          watchdog_registration_at: lastRegistration?.at ?? null,
         }
         if (prompt) {
           taskCoverage.push(
@@ -426,26 +456,9 @@ export function createWatchdogBridge(
           rawPayload: { task_id: taskId, conversation_id: watch.conversation_id },
         })
 
-        let runtimeTab: SupervisedTaskView['runtimeTab']
-        let runtimeTabState: SupervisedTaskView['runtimeTabState'] = 'unknown'
-
-        if (relayTargets) {
-          const target = relayTargets.find(item =>
-            item.type === 'page'
-            && typeof item.url === 'string'
-            && exactConversationId(item.url) === watch.conversation_id
-          )
-          if (target) {
-            runtimeTabState = 'present'
-            runtimeTab = {
-              id: target.id,
-              title: target.title,
-              url: target.url,
-            }
-          } else {
-            runtimeTabState = 'absent'
-          }
-        }
+        const runtimeTab = observedSidecarTab(watch)
+        const runtimeTabState: SupervisedTaskView['runtimeTabState'] =
+          runtimeTab ? 'present' : 'unknown'
 
         seenTaskKeys.add(taskKey)
         views.push({
@@ -465,6 +478,7 @@ export function createWatchdogBridge(
           runtimeTabState,
           runtimeTab,
           registeredAt: epochSecondsIso(watch.registered_at) ?? undefined,
+          lastRegistration,
           bindingChangedAt: epochSecondsIso(watch.binding_changed_at) ?? undefined,
           lastPollAt: epochSecondsIso(watch.last_poll_at) ?? undefined,
           lastSuccessAt: epochSecondsIso(watch.last_success_at) ?? undefined,
@@ -598,38 +612,105 @@ export function createWatchdogBridge(
     }
   }
 
-  async function register(targetUrl: string): Promise<WatchdogRegisterResult> {
-    const raw = await fetchJson<{ conversation_id: string; created: boolean }>(
-      fetchImpl,
-      `${watchdogUrl}/register`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ url: targetUrl }),
-      },
+  async function confirmRegistry(
+    conversationId: string,
+    registered: boolean,
+    operationId: string,
+  ): Promise<RegistryConfirmation> {
+    // A poll started before the mutation cannot confirm its result.
+    if (inFlight) await sync()
+    const snapshot = await sync()
+    const observedRegistered = snapshot.tasks.some(
+      task => task.currentConversation.id === conversationId,
     )
-    await sync()
-    return {
-      conversationId: raw.conversation_id,
-      created: raw.created,
+    if (!snapshot.integration.available || observedRegistered !== registered) {
+      throw new WatchdogRequestError(
+        snapshot.integration.available ? 502 : 503,
+        {
+          error: 'registry_confirmation_unknown',
+          message: '操作已提交，但尚未确认 Watchdog registry 的最终状态。请刷新确认，勿重复提交。',
+          conversation_id: conversationId,
+          operation_id: operationId,
+          accepted: true,
+          confirmed: false,
+          detail: snapshot.integration.error
+            ?? `Fresh registry snapshot still shows registered=${observedRegistered}.`,
+        },
+        `${watchdogUrl}/watches`,
+      )
+    }
+    return { confirmed: true, confirmedAt: now().toISOString(), operationId, snapshot }
+  }
+
+  function validateReceipt(
+    raw: { conversation_id?: string; operation_id?: string; created?: boolean; removed?: boolean },
+    conversationId: string,
+    operationId: string,
+    changedProperty: 'created' | 'removed',
+  ): void {
+    if (typeof raw?.[changedProperty] !== 'boolean'
+      || raw?.conversation_id !== conversationId
+      || (raw.operation_id !== undefined && raw.operation_id !== operationId)) {
+      throw new WatchdogRequestError(502, {
+        error: 'registry_confirmation_unknown',
+        message: 'Watchdog 操作回执与请求不匹配，最终状态未知。请刷新确认，勿重复提交。',
+        conversation_id: conversationId,
+        operation_id: operationId,
+        confirmed: false,
+      }, watchdogUrl)
     }
   }
 
-  async function unregister(conversationId: string): Promise<WatchdogUnregisterResult> {
-    const raw = await fetchJson<{ conversation_id: string; removed: boolean }>(
-      fetchImpl,
-      `${watchdogUrl}/unregister`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ conversation_id: conversationId }),
-      },
-    )
-    await sync()
-    return {
-      conversationId: raw.conversation_id,
-      removed: raw.removed,
+  async function register(
+    targetUrl: string,
+    operationId: string = randomUUID(),
+  ): Promise<WatchdogRegisterResult> {
+    const conversationId = exactConversationId(targetUrl)
+    if (!conversationId) {
+      throw new WatchdogRequestError(400, {
+        error: 'invalid_conversation_url',
+        message: 'A ChatGPT conversation URL is required.',
+      }, `${watchdogUrl}/register`)
     }
+    const raw = await fetchJson<{
+      conversation_id: string; created: boolean; operation_id?: string
+    }>(fetchImpl, `${watchdogUrl}/register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        url: targetUrl,
+        explicit: true,
+        source: 'observatory-ui',
+        actor: 'human',
+        operation_id: operationId,
+        reason: 'manual-bind',
+      }),
+    })
+    validateReceipt(raw, conversationId, operationId, 'created')
+    const confirmation = await confirmRegistry(conversationId, true, operationId)
+    return { conversationId, created: raw.created, ...confirmation }
+  }
+
+  async function unregister(
+    conversationId: string,
+    operationId: string = randomUUID(),
+  ): Promise<WatchdogUnregisterResult> {
+    const raw = await fetchJson<{
+      conversation_id: string; removed: boolean; operation_id?: string
+    }>(fetchImpl, `${watchdogUrl}/unregister`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        conversation_id: conversationId,
+        source: 'observatory-ui',
+        actor: 'human',
+        operation_id: operationId,
+        reason: 'manual-unbind',
+      }),
+    })
+    validateReceipt(raw, conversationId, operationId, 'removed')
+    const confirmation = await confirmRegistry(conversationId, false, operationId)
+    return { conversationId, removed: raw.removed, ...confirmation }
   }
 
   async function getPrompt(taskId: string): Promise<TaskPromptState> {
@@ -824,6 +905,36 @@ function normalizePrompt(
   }
 }
 
+function normalizeRegistration(
+  raw: WatchdogWatch['last_registration'],
+): RegistrationProvenance | undefined {
+  if (!raw
+    || ![raw.source, raw.actor, raw.operation_id, raw.reason].every(
+      value => typeof value === 'string' && value.trim().length > 0,
+    )) return undefined
+  return {
+    source: raw.source,
+    actor: raw.actor,
+    operationId: raw.operation_id,
+    reason: raw.reason,
+    at: epochSecondsIso(raw.at) ?? undefined,
+  }
+}
+
+function observedSidecarTab(watch: WatchdogWatch): SupervisedTaskView['runtimeTab'] {
+  const raw = watch.diagnostics?.sidecar_tab
+  if (!raw || typeof raw !== 'object') return undefined
+  const tab = raw as Record<string, unknown>
+  if (typeof tab.id !== 'string' || !tab.id.trim()
+    || typeof tab.url !== 'string'
+    || exactConversationId(tab.url) !== watch.conversation_id) return undefined
+  return {
+    id: tab.id,
+    title: typeof tab.title === 'string' ? tab.title : undefined,
+    url: tab.url,
+  }
+}
+
 function numberOrZero(value: number | undefined): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
@@ -834,7 +945,7 @@ function exactConversationId(url: string): string | undefined {
     if (parsed.hostname !== 'chatgpt.com') return undefined
     const segments = parsed.pathname.split('/').filter(Boolean)
     const cIndex = segments.lastIndexOf('c')
-    if (cIndex < 0 || cIndex + 1 >= segments.length) return undefined
+    if (parsed.protocol !== 'https:' || cIndex < 0 || cIndex + 2 !== segments.length) return undefined
     return segments[cIndex + 1]
   } catch {
     return undefined

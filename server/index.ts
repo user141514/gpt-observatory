@@ -56,10 +56,12 @@ const promptUpdateSchema = z.object({
 
 const watchdogRegisterSchema = z.object({
   url: z.string().trim().min(1),
+  operationId: z.uuid().optional(),
 })
 
 const watchdogUnregisterSchema = z.object({
   conversationId: z.string().trim().min(1),
+  operationId: z.uuid().optional(),
 })
 
 const relationSchema = z.object({
@@ -110,7 +112,7 @@ app.post('/api/watchdog/sync', async (_req, res, next) => {
 app.post('/api/watchdog/register', async (req, res, next) => {
   try {
     const input = watchdogRegisterSchema.parse(req.body)
-    res.json(await watchdog.register(input.url))
+    res.json(await watchdog.register(input.url, input.operationId))
   } catch (error) {
     if (sendWatchdogBoundaryError(res, error)) return
     next(error)
@@ -120,7 +122,7 @@ app.post('/api/watchdog/register', async (req, res, next) => {
 app.post('/api/watchdog/unregister', async (req, res, next) => {
   try {
     const input = watchdogUnregisterSchema.parse(req.body)
-    res.json(await watchdog.unregister(input.conversationId))
+    res.json(await watchdog.unregister(input.conversationId, input.operationId))
   } catch (error) {
     if (sendWatchdogBoundaryError(res, error)) return
     next(error)

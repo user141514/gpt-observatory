@@ -42,6 +42,9 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { api } from './api'
+import { createRegistryRefreshGate } from './registry-refresh'
+import { projectRegistryGraph } from './registry-graph'
+import { createLifecycleCommandGate } from './lifecycle-command'
 import type {
   CurrentEntity,
   CurrentFactDetail,
@@ -81,25 +84,48 @@ export default function App() {
   const [now, setNow] = useState<NowResponse>({ counts: {}, entities: [] })
   const [timeline, setTimeline] = useState<TimelineEvent[]>([])
   const [graph, setGraph] = useState<GraphResponse>({ nodes: [], edges: [] })
+  const [lastSuccessfulRegistry, setLastSuccessfulRegistry] = useState<SupervisedTasksResponse>()
+  const registryGraph = useMemo(
+    () => projectRegistryGraph(graph, lastSuccessfulRegistry),
+    [graph, lastSuccessfulRegistry],
+  )
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchResult[]>([])
   const [error, setError] = useState('')
   const [refreshing, setRefreshing] = useState(false)
+  const registryRefreshGate = useRef(createRegistryRefreshGate())
+  const lifecycleCommandGate = useRef(createLifecycleCommandGate())
+  const [lifecyclePending, setLifecyclePending] = useState(false)
 
-  async function refresh() {
+  async function runLifecycle(command: () => Promise<void>): Promise<void> {
+    return lifecycleCommandGate.current.run(async () => {
+      setLifecyclePending(true)
+      try {
+        await command()
+      } finally {
+        setLifecyclePending(false)
+      }
+    })
+  }
+
+  async function refresh(confirmedSnapshot?: SupervisedTasksResponse) {
+    const isCurrent = registryRefreshGate.current.begin()
     setRefreshing(true)
     try {
-      const supervisedTasks = await api.syncWatchdog()
-      const [n, t, g] = await Promise.all([api.now(), api.timeline(), api.graph()])
+      const supervisedTasks = confirmedSnapshot ?? await api.syncWatchdog()
+      if (!isCurrent()) return
       setSupervised(supervisedTasks)
+      if (supervisedTasks.integration.available) setLastSuccessfulRegistry(supervisedTasks)
+      const [n, t, g] = await Promise.all([api.now(), api.timeline(), api.graph()])
+      if (!isCurrent()) return
       setNow(n)
       setTimeline(t.events)
       setGraph(g)
       setError('')
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      if (isCurrent()) setError(e instanceof Error ? e.message : String(e))
     } finally {
-      setRefreshing(false)
+      if (isCurrent()) setRefreshing(false)
     }
   }
 
@@ -218,11 +244,14 @@ export default function App() {
             <SupervisedTasks
               data={supervised}
               onPromptSaved={refresh}
+              onRegistryConfirmed={snapshot => void refresh(snapshot)}
+              runLifecycle={runLifecycle}
+              lifecyclePending={lifecyclePending}
             />
           )}
           {tab === 'now' && <Now data={now} />}
           {tab === 'timeline' && <Timeline events={timeline} />}
-          {tab === 'graph' && <GraphWorkbench data={graph} />}
+          {tab === 'graph' && <GraphWorkbench data={registryGraph} />}
           {tab === 'search' && (
             <Search query={query} setQuery={setQuery} results={results} submit={search} />
           )}
@@ -248,9 +277,15 @@ function Metric({ zh, en, value, detail }: { zh: string; en: string; value: numb
 function SupervisedTasks({
   data,
   onPromptSaved,
+  onRegistryConfirmed,
+  runLifecycle,
+  lifecyclePending,
 }: {
   data: SupervisedTasksResponse
   onPromptSaved: () => Promise<void>
+  onRegistryConfirmed: (snapshot: SupervisedTasksResponse) => void
+  runLifecycle: (command: () => Promise<void>) => Promise<void>
+  lifecyclePending: boolean
 }) {
   const [targetUrl, setTargetUrl] = useState('')
   const [binding, setBinding] = useState(false)
@@ -261,6 +296,8 @@ function SupervisedTasks({
   const [recentlyUnbound, setRecentlyUnbound] = useState<Array<{
     task: SupervisedTask
     removed: boolean
+    confirmedAt: string
+    operationId: string
   }>>([])
 
   const activeConversationIds = new Set(
@@ -285,14 +322,20 @@ function SupervisedTasks({
     setBinding(true)
     setBindingFeedback(null)
     try {
-      const result = await api.registerWatchdog(url)
-      await onPromptSaved()
-      setTargetUrl('')
-      setBindingFeedback({
-        tone: 'ok',
-        message: result.created
-          ? `已绑定 ${result.conversationId}`
-          : `该对话已经在 Watchdog 中：${result.conversationId}`,
+      await runLifecycle(async () => {
+        const result = await api.registerWatchdog(url)
+        if (!result.confirmed || !result.confirmedAt
+          || !result.snapshot?.integration.available) {
+          throw new Error('绑定已提交，但 registry 状态尚未确认。请刷新确认，勿重复提交。')
+        }
+        onRegistryConfirmed(result.snapshot)
+        setTargetUrl('')
+        setBindingFeedback({
+          tone: 'ok',
+          message: result.created
+            ? `已确认绑定 ${result.conversationId} · ${dateTime(result.confirmedAt)}`
+            : `已确认该对话在 Watchdog 中：${result.conversationId} · ${dateTime(result.confirmedAt)}`,
+        })
       })
     } catch (cause) {
       setBindingFeedback({
@@ -305,14 +348,20 @@ function SupervisedTasks({
   }
 
   async function unbindWatchdog(task: SupervisedTask) {
-    const result = await api.unregisterWatchdog(task.currentConversation.id)
-    setRecentlyUnbound(current => [
-      { task, removed: result.removed },
-      ...current.filter(
-        receipt => receipt.task.currentConversation.id !== task.currentConversation.id,
-      ),
-    ])
-    await onPromptSaved()
+    await runLifecycle(async () => {
+      const result = await api.unregisterWatchdog(task.currentConversation.id)
+      if (!result.confirmed || !result.confirmedAt
+        || !result.snapshot?.integration.available) {
+        throw new Error('解绑已提交，但 registry 状态尚未确认。请刷新确认，勿重复提交。')
+      }
+      onRegistryConfirmed(result.snapshot)
+      setRecentlyUnbound(current => [
+        { task, removed: result.removed, confirmedAt: result.confirmedAt, operationId: result.operationId },
+        ...current.filter(
+          receipt => receipt.task.currentConversation.id !== task.currentConversation.id,
+        ),
+      ])
+    })
   }
 
   return (
@@ -365,10 +414,10 @@ function SupervisedTasks({
             onChange={event => setTargetUrl(event.target.value)}
             placeholder="https://chatgpt.com/.../c/<conversation-uuid>"
             aria-label="ChatGPT conversation URL"
-            disabled={binding}
+            disabled={binding || lifecyclePending}
             required
           />
-          <button type="submit" disabled={binding || !targetUrl.trim()}>
+          <button type="submit" disabled={binding || lifecyclePending || !targetUrl.trim()}>
             <Link2 size={14} strokeWidth={1.9} />
             <span>{binding ? '绑定中' : '绑定'}</span>
           </button>
@@ -389,6 +438,7 @@ function SupervisedTasks({
               promptWritable={data.integration.promptAvailable}
               onPromptSaved={onPromptSaved}
               onUnbind={unbindWatchdog}
+              lifecyclePending={lifecyclePending}
               key={task.taskId}
             />
           ))}
@@ -406,7 +456,7 @@ function SupervisedTasks({
         <div className="recently-unbound-block">
           <div className="recently-unbound-heading">
             <strong>最近解绑</strong>
-            <small>LOCAL ACTION RECEIPTS · 不属于当前 Watchdog 权威集合</small>
+            <small>CONFIRMED REGISTRY RECEIPTS · 已读取新快照确认</small>
           </div>
           <div className="supervised-task-grid">
             {visibleUnboundReceipts.map(receipt => (
@@ -414,6 +464,8 @@ function SupervisedTasks({
                 key={receipt.task.currentConversation.id}
                 task={receipt.task}
                 removed={receipt.removed}
+                confirmedAt={receipt.confirmedAt}
+                operationId={receipt.operationId}
                 onDismiss={() => setRecentlyUnbound(current => current.filter(
                   item => item.task.currentConversation.id
                     !== receipt.task.currentConversation.id,
@@ -433,12 +485,14 @@ function SupervisedTaskCard({
   promptWritable,
   onPromptSaved,
   onUnbind,
+  lifecyclePending,
 }: {
   task: SupervisedTask
   integrationAvailable: boolean
   promptWritable: boolean
   onPromptSaved: () => Promise<void>
   onUnbind: (task: SupervisedTask) => Promise<void>
+  lifecyclePending: boolean
 }) {
   const [unbinding, setUnbinding] = useState(false)
   const [unbindError, setUnbindError] = useState('')
@@ -476,7 +530,7 @@ function SupervisedTaskCard({
             type="button"
             className="watchdog-unbind-button"
             onClick={() => void unbindWatchdog()}
-            disabled={unbinding}
+            disabled={unbinding || lifecyclePending}
             title="直接从 Watchdog registry 注销此对话"
           >
             <Unlink2 size={13} strokeWidth={1.9} />
@@ -524,7 +578,7 @@ function SupervisedTaskCard({
                 ? task.runtimeTab?.title
                 : task.runtimeTabState === 'absent'
                   ? '未绑定 / Not currently rendered'
-                  : '未知 / Relay observation unavailable'}
+                  : '未知 / Sidecar observation unavailable'}
             </strong>
             <code>{task.runtimeTabState === 'present' ? task.runtimeTab?.id : '—'}</code>
           </div>
@@ -532,6 +586,26 @@ function SupervisedTaskCard({
       </div>
 
       <dl className="task-diagnostics">
+        <div>
+          <dt>注册来源 / Registration source</dt>
+          <dd>{task.lastRegistration?.source ?? '未知 / Unknown'}</dd>
+        </div>
+        <div>
+          <dt>操作者 / Actor</dt>
+          <dd>{task.lastRegistration?.actor ?? '—'}</dd>
+        </div>
+        <div>
+          <dt>注册原因 / Reason</dt>
+          <dd>{task.lastRegistration?.reason ?? '—'}</dd>
+        </div>
+        <div>
+          <dt>注册时间 / Registered at</dt>
+          <dd>{task.lastRegistration?.at ? dateTime(task.lastRegistration.at) : '—'}</dd>
+        </div>
+        <div>
+          <dt>操作 ID / Operation ID</dt>
+          <dd>{task.lastRegistration?.operationId ?? '—'}</dd>
+        </div>
         <div>
           <dt>最近成功 / Last success</dt>
           <dd>{task.lastSuccessAt ? dateTime(task.lastSuccessAt) : '—'}</dd>
@@ -573,10 +647,14 @@ function SupervisedTaskCard({
 function UnboundTaskReceipt({
   task,
   removed,
+  confirmedAt,
+  operationId,
   onDismiss,
 }: {
   task: SupervisedTask
   removed: boolean
+  confirmedAt: string
+  operationId: string
   onDismiss: () => void
 }) {
   return (
@@ -585,8 +663,8 @@ function UnboundTaskReceipt({
         <div>
           <span className="task-status unknown">
             <i />
-            已解绑
-            <small>UNREGISTERED</small>
+            已确认解绑
+            <small>CONFIRMED UNREGISTERED</small>
           </span>
           <h3>{task.label}</h3>
         </div>
@@ -618,10 +696,14 @@ function UnboundTaskReceipt({
         </div>
       </div>
 
+      <dl className="task-diagnostics">
+        <div><dt>确认时间 / Confirmed at</dt><dd>{dateTime(confirmedAt)}</dd></div>
+        <div><dt>操作 ID / Operation ID</dt><dd>{operationId}</dd></div>
+      </dl>
       <div className="unbind-receipt-note">
         {removed
-          ? 'Watchdog registry 已确认注销。此卡片只保留本次操作回执，不计入监督任务。'
-          : 'Watchdog registry 中已经没有该对话；保留此卡片作为本次操作回执。'}
+          ? '操作后新读取的 Watchdog registry 快照已确认该对话不在监督集合。此卡片保留确认回执。'
+          : '操作后新读取的 Watchdog registry 快照已确认该对话已经不在监督集合；保留确认回执。'}
       </div>
     </article>
   )

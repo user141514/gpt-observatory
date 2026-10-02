@@ -58,7 +58,7 @@ export const api = {
     const response = await fetch('/api/watchdog/register', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ url, operationId: crypto.randomUUID() }),
     })
     if (!response.ok) throw await apiError(response)
     return response.json() as Promise<WatchdogRegisterResult>
@@ -69,7 +69,7 @@ export const api = {
     const response = await fetch('/api/watchdog/unregister', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ conversationId }),
+      body: JSON.stringify({ conversationId, operationId: crypto.randomUUID() }),
     })
     if (!response.ok) throw await apiError(response)
     return response.json() as Promise<WatchdogUnregisterResult>

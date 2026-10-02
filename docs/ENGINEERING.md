@@ -82,7 +82,9 @@ Tab
 - **Tab is runtime-only.** Refreshing, reopening, replacing, or losing a browser tab must not create a new task or durable factual entity.
 - **Watchdog Registry owns the supervised-task allowlist and current task→conversation binding.**
 - **Observatory owns temporal factual history and projections.** It must not invent supervision membership or become a second task-lifecycle authority.
-- Browser Relay may be queried only to resolve the current tab for a conversation already present in the Watchdog supervised set. Unregistered ChatGPT tabs remain invisible to supervision ingestion.
+- Normal supervision ingestion reads only Watchdog health and registry snapshots. Optional Watchdog `diagnostics.sidecar_tab` metadata resolves a runtime tab only when its URL matches the registered conversation; missing evidence remains unknown. Observatory does not probe Browser Relay/CDP during normal observation.
+- Manual lifecycle requests carry `source=observatory-ui`, `actor=human`, a UUID `operation_id`, and `reason=manual-bind|manual-unbind`; registration also carries `explicit=true`. Watchdog-reported `last_registration` is displayed and projected as protected `watchdog_registration_*` facts.
+- A mutation ACK is a receipt, not confirmation. Observatory drains any pre-mutation sync and reads a new successful registry snapshot after the ACK. Bind success requires the exact conversation to be present; unbind success requires it absent. Unavailable, malformed, or contradictory confirmation returns an unknown-state error and never creates a success card. Confirmed receipts include their operation ID and confirmation time. All manual bind/unbind controls share an App-lifetime lifecycle gate held through command, confirmation, and snapshot application; later UI mutations cannot overtake an earlier delayed response, including across view changes. UI refresh generations prevent late pre-mutation HTTP responses from replacing a confirmed snapshot. Graph rendering filters Watchdog-owned nodes and edges against the last successful registry snapshot, so a failed secondary graph fetch cannot restore retired task/conversation topology; unrelated canonical entities remain visible.
 
 Core invariant:
 
@@ -140,7 +142,7 @@ Embedding backend contract:
 | R4 vector retrieval | local embedding + SurrealDB HNSW returns semantic neighbours | passed: pinned q8 MiniLM local-only embedding works at 384 dimensions; offline fallback + self-healing semantic-index test also passes |
 | R5 human visual acceptance | NOW / TIMELINE / GRAPH / SEARCH use live API data | ready for human acceptance at local Vite UI on port 4318 |
 | R6 Obsidian projection | generated Markdown + .base files contain wikilinks/frontmatter | passed: API-backed export generated vault successfully |
-| R7 GPT conversation ingestion | Watchdog registered Task → current Conversation projection; Relay only resolves runtime Tab for registered conversations | passed: source tests + live protocol-v3 task-first projection |
+| R7 GPT conversation ingestion | Watchdog registered Task → current Conversation projection; optional Sidecar diagnostics resolve runtime Tab without Relay/CDP probing | passed: source tests + live protocol-v3 task-first projection |
 | R8 Watchdog supervision | task-first registry survives process restart and a real poll cycle with fresh success | passed: live deployed task-first supervision with persisted task identity, real successful poll, and Observatory projection; adaptive prompt rollout advances the control protocol to v4 |
 
 ## Acceptance scenarios

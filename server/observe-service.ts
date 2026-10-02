@@ -1,6 +1,6 @@
 import type { ObserveInput, ObserveResult } from './store.js'
 
-const WATCHDOG_PROMPT_FACT_PREFIX = 'watchdog_prompt_'
+const WATCHDOG_FACT_PREFIXES = ['watchdog_prompt_', 'watchdog_registration_']
 
 export class ObservationAuthorityError extends Error {
   readonly attributes: string[]
@@ -8,7 +8,7 @@ export class ObservationAuthorityError extends Error {
   constructor(attributes: string[]) {
     const unique = [...new Set(attributes)].sort()
     super(
-      `external observations cannot write Watchdog-owned prompt facts: ${unique.join(', ')}`,
+      `external observations cannot write Watchdog-owned facts: ${unique.join(', ')}`,
     )
     this.name = 'ObservationAuthorityError'
     this.attributes = unique
@@ -30,7 +30,7 @@ export function assertExternalObservationAuthority(
     ...Object.keys(input.facts),
   ]
   const forbidden = attributes.filter(attribute =>
-    attribute.startsWith(WATCHDOG_PROMPT_FACT_PREFIX),
+    WATCHDOG_FACT_PREFIXES.some(prefix => attribute.startsWith(prefix)),
   )
   if (forbidden.length) {
     throw new ObservationAuthorityError(forbidden)

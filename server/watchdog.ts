@@ -134,6 +134,7 @@ export interface SupervisedTaskView {
   lastSuccessAt?: string
   consecutiveFailures: number
   lastError?: string
+  observationUnavailableReason?: string
   prompt?: TaskPromptState
 }
 
@@ -484,6 +485,9 @@ export function createWatchdogBridge(
           lastSuccessAt: epochSecondsIso(watch.last_success_at) ?? undefined,
           consecutiveFailures: numberOrZero(watch.consecutive_failures),
           lastError: watch.last_error ?? undefined,
+          observationUnavailableReason: watch.state === 'observation_unavailable'
+            ? stringFact(watch.diagnostics?.reason)
+            : undefined,
           prompt,
         })
       }

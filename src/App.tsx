@@ -45,6 +45,7 @@ import { api } from './api'
 import { createRegistryRefreshGate } from './registry-refresh'
 import { projectRegistryGraph } from './registry-graph'
 import { createLifecycleCommandGate } from './lifecycle-command'
+import { observationUnavailableMessage, taskStatus } from './task-status'
 import type {
   CurrentEntity,
   CurrentFactDetail,
@@ -435,6 +436,7 @@ function SupervisedTasks({
             <SupervisedTaskCard
               task={task}
               integrationAvailable={data.integration.ready}
+              registryAvailable={data.integration.available}
               promptWritable={data.integration.promptAvailable}
               onPromptSaved={onPromptSaved}
               onUnbind={unbindWatchdog}
@@ -482,6 +484,7 @@ function SupervisedTasks({
 function SupervisedTaskCard({
   task,
   integrationAvailable,
+  registryAvailable,
   promptWritable,
   onPromptSaved,
   onUnbind,
@@ -489,6 +492,7 @@ function SupervisedTaskCard({
 }: {
   task: SupervisedTask
   integrationAvailable: boolean
+  registryAvailable: boolean
   promptWritable: boolean
   onPromptSaved: () => Promise<void>
   onUnbind: (task: SupervisedTask) => Promise<void>
@@ -496,7 +500,8 @@ function SupervisedTaskCard({
 }) {
   const [unbinding, setUnbinding] = useState(false)
   const [unbindError, setUnbindError] = useState('')
-  const status = taskStatus(task, integrationAvailable)
+  const status = taskStatus(task, integrationAvailable, registryAvailable)
+  const observationMessage = registryAvailable ? observationUnavailableMessage(task) : undefined
 
   async function unbindWatchdog() {
     if (unbinding) return
@@ -620,10 +625,13 @@ function SupervisedTaskCard({
         </div>
       </dl>
 
-      {task.lastError && (
+      {(task.lastError || observationMessage) && (
         <div className="task-error">
-          <span>监督异常 / Supervision error</span>
-          <code>{task.lastError}</code>
+          <span>{registryAvailable && task.watchdogState === 'observation_unavailable'
+            ? '观测不可用 / Observation unavailable'
+            : '监督异常 / Supervision error'}</span>
+          {observationMessage && <span>{observationMessage}</span>}
+          {task.lastError && <code>{task.lastError}</code>}
         </div>
       )}
 
@@ -891,33 +899,6 @@ function TaskPromptEditor({
       </div>
     </details>
   )
-}
-
-function taskStatus(task: SupervisedTask, integrationAvailable: boolean) {
-  if (!integrationAvailable) {
-    return { zh: '状态未知', en: 'UNVERIFIED', tone: 'unknown' }
-  }
-
-  const state = task.watchdogState
-  if (state === 'need_input') {
-    return { zh: '等待输入', en: 'NEED INPUT', tone: 'waiting' }
-  }
-  if (state === 'submission_unknown') {
-    return { zh: '发送待确认', en: 'DELIVERY UNCERTAIN', tone: 'waiting' }
-  }
-  if (state === 'sent_no_visible_progress') {
-    return { zh: '等待进展', en: 'WAITING PROGRESS', tone: 'waiting' }
-  }
-  if (state === 'send_rejected' || state === 'target_changed' || state === 'degraded') {
-    return { zh: '监督异常', en: 'DEGRADED', tone: 'degraded' }
-  }
-  if (state === 'done') {
-    return { zh: '任务完成', en: 'DONE', tone: 'healthy' }
-  }
-  if (task.operational) {
-    return { zh: '监督正常', en: 'OPERATIONAL', tone: 'healthy' }
-  }
-  return { zh: '监督异常', en: 'DEGRADED', tone: 'degraded' }
 }
 
 function Now({ data }: { data: NowResponse }) {

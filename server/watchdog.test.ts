@@ -769,6 +769,16 @@ test('active registry uses Sidecar diagnostics and provenance without requesting
       sidecar_tab: { id: 'WRONG_TAB', url: `https://chatgpt.com/c/${CHAT_B}` },
     } }
     assert.equal((await bridge.sync()).tasks[0]?.runtimeTabState, 'unknown')
+
+    watch = { ...watch, state: 'observation_unavailable',
+      last_error: 'RuntimeError: persistent_turn_identity_unavailable',
+      diagnostics: { reason: 'persistent_turn_identity_unavailable', observation_available: false },
+    }
+    const unavailable = await bridge.sync()
+    assert.equal(unavailable.tasks[0]?.watchdogState, 'observation_unavailable')
+    assert.equal(unavailable.tasks[0]?.observationUnavailableReason, 'persistent_turn_identity_unavailable')
+    assert.equal(unavailable.tasks[0]?.lastError, 'RuntimeError: persistent_turn_identity_unavailable')
+    assert.equal(unavailable.tasks[0]?.operational, false)
     assert.equal(relayRequests, 0)
   } finally {
     await db.close()

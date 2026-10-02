@@ -131,6 +131,7 @@ export interface SupervisedTask {
   lastSuccessAt?: string
   consecutiveFailures: number
   lastError?: string
+  observationUnavailableReason?: string
   prompt?: TaskPromptState
 }
 

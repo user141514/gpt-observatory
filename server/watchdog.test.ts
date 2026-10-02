@@ -331,6 +331,103 @@ test('watchdog bridge preserves canonical task identity and keeps tabs runtime-o
   }
 })
 
+test('watchdog bridge registers and unregisters through authoritative registry', async () => {
+  const db = await createDatabase('mem://')
+  try {
+    const store = createStore(db)
+    const targetUrl = `https://chatgpt.com/c/${CHAT_A}`
+    let watches: WatchdogWatch[] = []
+
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/health')) {
+        return jsonResponse({
+          ready: true,
+          polling_fresh: true,
+          protocol_version: 2,
+          active_count: watches.length,
+          degraded_count: 0,
+        })
+      }
+      if (url.endsWith('/watches')) return jsonResponse({ watches })
+      if (url.endsWith('/json/list')) return jsonResponse([])
+      if (url.endsWith('/register') && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>
+        assert.equal(body.url, targetUrl)
+        watches = [{
+          conversation_id: CHAT_A,
+          target_url: targetUrl,
+          state: 'waiting',
+          connected: true,
+          registered_at: 1_790_000_000,
+          last_poll_at: 1_790_000_100,
+          last_success_at: 1_790_000_100,
+          consecutive_failures: 0,
+          last_error: null,
+        }]
+        return jsonResponse({ conversation_id: CHAT_A, created: true })
+      }
+      if (url.endsWith('/unregister') && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>
+        assert.equal(body.conversation_id, CHAT_A)
+        watches = []
+        return jsonResponse({ conversation_id: CHAT_A, removed: true })
+      }
+      return new Response('not found', { status: 404 })
+    }
+
+    const bridge = createWatchdogBridge(store, {
+      fetchImpl,
+      now: () => new Date('2026-10-02T12:30:00.000Z'),
+    })
+
+    const registered = await bridge.register(targetUrl)
+    assert.deepEqual(registered, { conversationId: CHAT_A, created: true })
+    assert.equal(bridge.current().tasks.length, 1)
+    assert.equal(bridge.current().tasks[0]?.currentConversation.id, CHAT_A)
+
+    const unregistered = await bridge.unregister(CHAT_A)
+    assert.deepEqual(unregistered, { conversationId: CHAT_A, removed: true })
+    assert.equal(bridge.current().tasks.length, 0)
+  } finally {
+    await db.close()
+  }
+})
+
+test('watchdog bridge does not touch browser relay when registry is empty', async () => {
+  const db = await createDatabase('mem://')
+  try {
+    const store = createStore(db)
+    let relayRequests = 0
+    const fetchImpl: typeof fetch = async input => {
+      const url = String(input)
+      if (url.endsWith('/health')) {
+        return jsonResponse({
+          ready: true,
+          polling_fresh: true,
+          protocol_version: 2,
+          active_count: 0,
+          degraded_count: 0,
+        })
+      }
+      if (url.endsWith('/watches')) return jsonResponse({ watches: [] })
+      if (url.endsWith('/json/list')) {
+        relayRequests += 1
+        return jsonResponse([])
+      }
+      return new Response('not found', { status: 404 })
+    }
+
+    const bridge = createWatchdogBridge(store, { fetchImpl })
+    const projection = await bridge.sync()
+
+    assert.equal(projection.tasks.length, 0)
+    assert.equal(relayRequests, 0)
+  } finally {
+    await db.close()
+  }
+})
+
 test('watchdog prompt capability fails closed before protocol v4', async () => {
   const db = await createDatabase('mem://')
   try {

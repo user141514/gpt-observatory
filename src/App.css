@@ -400,6 +400,117 @@
   box-shadow: 0 0 0 5px rgba(167, 127, 117, 0.12);
 }
 
+.watchdog-bind-panel {
+  display: grid;
+  gap: 11px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-1);
+}
+
+.watchdog-bind-copy {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.watchdog-bind-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  place-items: center;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  color: var(--muted);
+  background: var(--surface-soft);
+}
+
+.watchdog-bind-copy > div {
+  display: grid;
+  gap: 2px;
+}
+
+.watchdog-bind-copy strong {
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.watchdog-bind-copy small {
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+.watchdog-bind-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.watchdog-bind-controls input {
+  min-width: 0;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  background: var(--surface);
+  font: 10px var(--font-mono);
+  outline: 0;
+}
+
+.watchdog-bind-controls input:focus {
+  border-color: rgba(95, 113, 125, 0.38);
+  box-shadow: 0 0 0 3px rgba(95, 113, 125, 0.08);
+}
+
+.watchdog-bind-controls button,
+.watchdog-unbind-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  color: var(--text);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.watchdog-bind-controls button {
+  min-width: 88px;
+  height: 38px;
+  padding: 0 13px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.watchdog-bind-controls button:disabled,
+.watchdog-unbind-button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.watchdog-bind-feedback {
+  padding: 8px 10px;
+  border-radius: 9px;
+  font: 9px var(--font-mono);
+}
+
+.watchdog-bind-feedback.ok {
+  color: #58705b;
+  background: rgba(174, 188, 171, 0.15);
+}
+
+.watchdog-bind-feedback.error,
+.watchdog-unbind-error {
+  color: #835b55;
+  background: rgba(175, 127, 117, 0.13);
+}
+
 .supervised-task-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
@@ -422,6 +533,94 @@
   gap: 18px;
 }
 
+.task-card-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+}
+
+.watchdog-unbind-button {
+  min-height: 27px;
+  padding: 0 8px;
+  border-radius: 8px;
+  color: #7a5c57;
+  font-size: 8px;
+  font-weight: 650;
+}
+
+.watchdog-unbind-button:hover:not(:disabled) {
+  border-color: rgba(158, 100, 96, 0.28);
+  background: rgba(175, 127, 117, 0.08);
+}
+
+.watchdog-unbind-error {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  font: 8px var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.recently-unbound-block {
+  display: grid;
+  gap: 10px;
+}
+
+.recently-unbound-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0 2px;
+}
+
+.recently-unbound-heading strong {
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.recently-unbound-heading small {
+  color: var(--muted-soft);
+  font-size: 7px;
+  letter-spacing: 0.05em;
+}
+
+.unbound-receipt {
+  border-style: dashed;
+  box-shadow: var(--shadow-1);
+  opacity: 0.88;
+}
+
+.receipt-dismiss-button {
+  min-height: 27px;
+  padding: 0 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--surface);
+  font-size: 8px;
+  cursor: pointer;
+}
+
+.receipt-dismiss-button:hover {
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.receipt-conversation {
+  margin-top: 13px;
+}
+
+.unbind-receipt-note {
+  margin-top: 10px;
+  padding: 9px 10px;
+  border-radius: 9px;
+  color: var(--muted);
+  background: var(--surface-soft);
+  font-size: 8px;
+  line-height: 1.5;
+}
+
 .task-card-head h3 {
   margin: 10px 0 0;
   color: var(--text-strong);
@@ -429,6 +628,25 @@
   font-size: 23px;
   line-height: 1.28;
   font-weight: 600;
+}
+
+@media (max-width: 760px) {
+  .watchdog-bind-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .watchdog-bind-controls button {
+    width: 100%;
+  }
+
+  .task-card-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .task-card-actions {
+    justify-content: space-between;
+  }
 }
 
 .task-status {

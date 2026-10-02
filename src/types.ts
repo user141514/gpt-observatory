@@ -79,6 +79,16 @@ export interface PromptUpdateInput {
   updatedBy?: string
 }
 
+export interface WatchdogRegisterResult {
+  conversationId: string
+  created: boolean
+}
+
+export interface WatchdogUnregisterResult {
+  conversationId: string
+  removed: boolean
+}
+
 export interface SupervisedTask {
   taskId: string
   stableKey: string

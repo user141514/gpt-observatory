@@ -21,6 +21,7 @@ import {
   History,
   Info,
   Layers3,
+  Link2,
   LockKeyhole,
   Maximize2,
   MessageSquareText,
@@ -34,6 +35,7 @@ import {
   Server,
   ShieldCheck,
   Sparkles,
+  Unlink2,
   Waypoints,
   ZoomIn,
   ZoomOut,
@@ -250,12 +252,68 @@ function SupervisedTasks({
   data: SupervisedTasksResponse
   onPromptSaved: () => Promise<void>
 }) {
+  const [targetUrl, setTargetUrl] = useState('')
+  const [binding, setBinding] = useState(false)
+  const [bindingFeedback, setBindingFeedback] = useState<{
+    tone: 'ok' | 'error'
+    message: string
+  } | null>(null)
+  const [recentlyUnbound, setRecentlyUnbound] = useState<Array<{
+    task: SupervisedTask
+    removed: boolean
+  }>>([])
+
+  const activeConversationIds = new Set(
+    data.tasks.map(task => task.currentConversation.id),
+  )
+  const visibleUnboundReceipts = recentlyUnbound.filter(
+    receipt => !activeConversationIds.has(receipt.task.currentConversation.id),
+  )
+
   const healthy = data.integration.ready
     ? data.tasks.filter(task => task.operational).length
     : 0
   const attention = data.integration.ready
     ? data.tasks.length - healthy
     : 0
+
+  async function bindWatchdog(event: FormEvent) {
+    event.preventDefault()
+    const url = targetUrl.trim()
+    if (!url || binding) return
+
+    setBinding(true)
+    setBindingFeedback(null)
+    try {
+      const result = await api.registerWatchdog(url)
+      await onPromptSaved()
+      setTargetUrl('')
+      setBindingFeedback({
+        tone: 'ok',
+        message: result.created
+          ? `已绑定 ${result.conversationId}`
+          : `该对话已经在 Watchdog 中：${result.conversationId}`,
+      })
+    } catch (cause) {
+      setBindingFeedback({
+        tone: 'error',
+        message: cause instanceof Error ? cause.message : String(cause),
+      })
+    } finally {
+      setBinding(false)
+    }
+  }
+
+  async function unbindWatchdog(task: SupervisedTask) {
+    const result = await api.unregisterWatchdog(task.currentConversation.id)
+    setRecentlyUnbound(current => [
+      { task, removed: result.removed },
+      ...current.filter(
+        receipt => receipt.task.currentConversation.id !== task.currentConversation.id,
+      ),
+    ])
+    await onPromptSaved()
+  }
 
   return (
     <section className="supervised-section">
@@ -292,6 +350,36 @@ function SupervisedTasks({
         <code>{data.integration.watchdogUrl}</code>
       </div>
 
+      <form className="watchdog-bind-panel" onSubmit={bindWatchdog}>
+        <div className="watchdog-bind-copy">
+          <span className="watchdog-bind-icon"><Link2 size={17} strokeWidth={1.8} /></span>
+          <div>
+            <strong>直接绑定 Watchdog</strong>
+            <small>DIRECT REGISTRATION · 不打开目标对话，不调用模型，只写入本机 Watchdog registry</small>
+          </div>
+        </div>
+        <div className="watchdog-bind-controls">
+          <input
+            type="url"
+            value={targetUrl}
+            onChange={event => setTargetUrl(event.target.value)}
+            placeholder="https://chatgpt.com/.../c/<conversation-uuid>"
+            aria-label="ChatGPT conversation URL"
+            disabled={binding}
+            required
+          />
+          <button type="submit" disabled={binding || !targetUrl.trim()}>
+            <Link2 size={14} strokeWidth={1.9} />
+            <span>{binding ? '绑定中' : '绑定'}</span>
+          </button>
+        </div>
+        {bindingFeedback && (
+          <div className={`watchdog-bind-feedback ${bindingFeedback.tone}`} role="status">
+            {bindingFeedback.message}
+          </div>
+        )}
+      </form>
+
       {data.tasks.length ? (
         <div className="supervised-task-grid">
           {data.tasks.map(task => (
@@ -300,6 +388,7 @@ function SupervisedTasks({
               integrationAvailable={data.integration.ready}
               promptWritable={data.integration.promptAvailable}
               onPromptSaved={onPromptSaved}
+              onUnbind={unbindWatchdog}
               key={task.taskId}
             />
           ))}
@@ -312,6 +401,28 @@ function SupervisedTasks({
             : 'Waiting for a successful Watchdog snapshot.'}
         />
       )}
+
+      {visibleUnboundReceipts.length > 0 && (
+        <div className="recently-unbound-block">
+          <div className="recently-unbound-heading">
+            <strong>最近解绑</strong>
+            <small>LOCAL ACTION RECEIPTS · 不属于当前 Watchdog 权威集合</small>
+          </div>
+          <div className="supervised-task-grid">
+            {visibleUnboundReceipts.map(receipt => (
+              <UnboundTaskReceipt
+                key={receipt.task.currentConversation.id}
+                task={receipt.task}
+                removed={receipt.removed}
+                onDismiss={() => setRecentlyUnbound(current => current.filter(
+                  item => item.task.currentConversation.id
+                    !== receipt.task.currentConversation.id,
+                ))}
+              />
+            ))}
+          </div>
+        </div>
+      )}
     </section>
   )
 }
@@ -321,13 +432,31 @@ function SupervisedTaskCard({
   integrationAvailable,
   promptWritable,
   onPromptSaved,
+  onUnbind,
 }: {
   task: SupervisedTask
   integrationAvailable: boolean
   promptWritable: boolean
   onPromptSaved: () => Promise<void>
+  onUnbind: (task: SupervisedTask) => Promise<void>
 }) {
+  const [unbinding, setUnbinding] = useState(false)
+  const [unbindError, setUnbindError] = useState('')
   const status = taskStatus(task, integrationAvailable)
+
+  async function unbindWatchdog() {
+    if (unbinding) return
+    setUnbinding(true)
+    setUnbindError('')
+    try {
+      await onUnbind(task)
+    } catch (cause) {
+      setUnbindError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setUnbinding(false)
+    }
+  }
+
   return (
     <article className="supervised-task-card">
       <div className="task-card-head">
@@ -339,10 +468,26 @@ function SupervisedTaskCard({
           </span>
           <h3>{task.label}</h3>
         </div>
-        <span className="task-identity">
-          {task.identitySource === 'watchdog_task_id' ? 'TASK ID' : 'LEGACY ID'}
-        </span>
+        <div className="task-card-actions">
+          <span className="task-identity">
+            {task.identitySource === 'watchdog_task_id' ? 'TASK ID' : 'LEGACY ID'}
+          </span>
+          <button
+            type="button"
+            className="watchdog-unbind-button"
+            onClick={() => void unbindWatchdog()}
+            disabled={unbinding}
+            title="直接从 Watchdog registry 注销此对话"
+          >
+            <Unlink2 size={13} strokeWidth={1.9} />
+            <span>{unbinding ? '解绑中' : '解绑'}</span>
+          </button>
+        </div>
       </div>
+
+      {unbindError && (
+        <div className="watchdog-unbind-error" role="alert">{unbindError}</div>
+      )}
 
       <div className="task-primary-state">
         <div>
@@ -421,6 +566,63 @@ function SupervisedTaskCard({
           当前 Watchdog 没有提供可信的 protocol-v4 prompt state；不会显示或编辑伪造的默认版本。
         </div>
       )}
+    </article>
+  )
+}
+
+function UnboundTaskReceipt({
+  task,
+  removed,
+  onDismiss,
+}: {
+  task: SupervisedTask
+  removed: boolean
+  onDismiss: () => void
+}) {
+  return (
+    <article className="supervised-task-card unbound-receipt">
+      <div className="task-card-head">
+        <div>
+          <span className="task-status unknown">
+            <i />
+            已解绑
+            <small>UNREGISTERED</small>
+          </span>
+          <h3>{task.label}</h3>
+        </div>
+        <button
+          type="button"
+          className="receipt-dismiss-button"
+          onClick={onDismiss}
+        >
+          关闭
+        </button>
+      </div>
+
+      <div className="task-primary-state">
+        <div>
+          <span>Watchdog 状态</span>
+          <small>SUPERVISION STATE</small>
+        </div>
+        <strong>unregistered</strong>
+      </div>
+
+      <div className="binding-row conversation-binding receipt-conversation">
+        <div className="binding-icon">C</div>
+        <div className="binding-main">
+          <span>原对话 <small>FORMER CONVERSATION</small></span>
+          <strong>{task.currentConversation.id}</strong>
+          <a href={task.currentConversation.url} target="_blank" rel="noreferrer">
+            打开对话 / Open conversation
+          </a>
+        </div>
+      </div>
+
+      <div className="unbind-receipt-note">
+        {removed
+          ? 'Watchdog registry 已确认注销。此卡片只保留本次操作回执，不计入监督任务。'
+          : 'Watchdog registry 中已经没有该对话；保留此卡片作为本次操作回执。'}
+      </div>
     </article>
   )
 }

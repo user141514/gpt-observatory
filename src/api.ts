@@ -6,6 +6,8 @@ import type {
   SupervisedTasksResponse,
   TaskPromptState,
   TimelineEvent,
+  WatchdogRegisterResult,
+  WatchdogUnregisterResult,
 } from './types'
 
 async function getJson<T>(url: string): Promise<T> {
@@ -49,9 +51,29 @@ export const api = {
   },
   syncWatchdog: () =>
     fetch('/api/watchdog/sync', { method: 'POST' }).then(async response => {
-      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
+      if (!response.ok) throw await apiError(response)
       return response.json() as Promise<SupervisedTasksResponse>
     }),
+  registerWatchdog: async (url: string): Promise<WatchdogRegisterResult> => {
+    const response = await fetch('/api/watchdog/register', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url }),
+    })
+    if (!response.ok) throw await apiError(response)
+    return response.json() as Promise<WatchdogRegisterResult>
+  },
+  unregisterWatchdog: async (
+    conversationId: string,
+  ): Promise<WatchdogUnregisterResult> => {
+    const response = await fetch('/api/watchdog/unregister', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ conversationId }),
+    })
+    if (!response.ok) throw await apiError(response)
+    return response.json() as Promise<WatchdogUnregisterResult>
+  },
   now: () => getJson<NowResponse>('/api/now'),
   timeline: () => getJson<{ events: TimelineEvent[] }>('/api/timeline'),
   graph: () => getJson<GraphResponse>('/api/graph'),

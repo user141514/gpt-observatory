@@ -46,6 +46,16 @@ export interface PromptUpdateInput {
   updatedBy?: string
 }
 
+export interface WatchdogRegisterResult {
+  conversationId: string
+  created: boolean
+}
+
+export interface WatchdogUnregisterResult {
+  conversationId: string
+  removed: boolean
+}
+
 export class WatchdogRequestError extends Error {
   readonly status: number
   readonly body: unknown
@@ -197,12 +207,14 @@ export function createWatchdogBridge(
         typeof health.protocol_version === 'number'
         && health.protocol_version >= 4
 
-      let relayTargets: RelayTarget[] | undefined
-      try {
-        const relayPayload = await fetchJson<unknown>(fetchImpl, `${relayUrl}/json/list`)
-        relayTargets = Array.isArray(relayPayload) ? relayPayload as RelayTarget[] : []
-      } catch {
-        relayTargets = undefined
+      let relayTargets: RelayTarget[] | undefined = []
+      if (watches.length > 0) {
+        try {
+          const relayPayload = await fetchJson<unknown>(fetchImpl, `${relayUrl}/json/list`)
+          relayTargets = Array.isArray(relayPayload) ? relayPayload as RelayTarget[] : []
+        } catch {
+          relayTargets = undefined
+        }
       }
 
       await store.observe({
@@ -586,6 +598,40 @@ export function createWatchdogBridge(
     }
   }
 
+  async function register(targetUrl: string): Promise<WatchdogRegisterResult> {
+    const raw = await fetchJson<{ conversation_id: string; created: boolean }>(
+      fetchImpl,
+      `${watchdogUrl}/register`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: targetUrl }),
+      },
+    )
+    await sync()
+    return {
+      conversationId: raw.conversation_id,
+      created: raw.created,
+    }
+  }
+
+  async function unregister(conversationId: string): Promise<WatchdogUnregisterResult> {
+    const raw = await fetchJson<{ conversation_id: string; removed: boolean }>(
+      fetchImpl,
+      `${watchdogUrl}/unregister`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ conversation_id: conversationId }),
+      },
+    )
+    await sync()
+    return {
+      conversationId: raw.conversation_id,
+      removed: raw.removed,
+    }
+  }
+
   async function getPrompt(taskId: string): Promise<TaskPromptState> {
     await requirePromptCapability()
     const raw = await fetchJson<WatchdogPromptState>(
@@ -622,7 +668,7 @@ export function createWatchdogBridge(
     return projection
   }
 
-  return { sync, current, getPrompt, updatePrompt }
+  return { sync, current, register, unregister, getPrompt, updatePrompt }
 }
 
 async function markConversationUnbound(

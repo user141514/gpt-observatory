@@ -122,6 +122,13 @@ export interface SupervisedTaskView {
     stableKey: string
   }
   runtimeTabState: 'present' | 'absent' | 'unknown'
+  runtimeTabObservation?: {
+    available: boolean
+    readable: boolean
+    source?: string
+    observedAt?: string
+    reason?: string
+  }
   runtimeTab?: {
     id: string
     title?: string
@@ -477,6 +484,15 @@ export function createWatchdogBridge(
             stableKey: conversationKey,
           },
           runtimeTabState,
+          runtimeTabObservation: typeof watch.diagnostics?.observation_available === 'boolean'
+            ? {
+              available: watch.diagnostics.observation_available,
+              readable: watch.diagnostics.observation_readable === true,
+              source: stringFact(watch.diagnostics.observation_source),
+              observedAt: stringFact(watch.diagnostics.observation_observed_at),
+              reason: stringFact(watch.diagnostics.reason),
+            }
+            : undefined,
           runtimeTab,
           registeredAt: epochSecondsIso(watch.registered_at) ?? undefined,
           lastRegistration,

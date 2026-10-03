@@ -119,6 +119,13 @@ export interface SupervisedTask {
     stableKey: string
   }
   runtimeTabState: 'present' | 'absent' | 'unknown'
+  runtimeTabObservation?: {
+    available: boolean
+    readable: boolean
+    source?: string
+    observedAt?: string
+    reason?: string
+  }
   runtimeTab?: {
     id: string
     title?: string

@@ -712,6 +712,57 @@ test('watchdog prompt proxy uses CAS and refreshes projection', async () => {
   }
 })
 
+test('readable browser observation is projected without inventing tab metadata or querying Relay', async () => {
+  const db = await createDatabase('mem://')
+  try {
+    const requests: string[] = []
+    const watch: WatchdogWatch = {
+      conversation_id: CHAT_A,
+      target_url: `https://chatgpt.com/c/${CHAT_A}`,
+      state: 'waiting_for_assistant',
+      connected: true,
+      last_success_at: 1_791_044_068,
+      diagnostics: {
+        observation_available: true,
+        observation_source: 'browser',
+        observation_readable: true,
+        observation_observed_at: '2026-10-03T16:14:28.528Z',
+        reason: 'observation_identity_incomplete',
+      },
+    }
+    const fetchImpl: typeof fetch = async input => {
+      const url = String(input)
+      requests.push(url)
+      if (url.endsWith('/health')) return jsonResponse({ ready: true, polling_fresh: true, protocol_version: 2 })
+      if (url.endsWith('/watches')) return jsonResponse({ watches: [watch] })
+      throw new Error(`unexpected request: ${url}`)
+    }
+    const bridge = createWatchdogBridge(createStore(db), { fetchImpl })
+    const task = (await bridge.sync()).tasks[0]
+    assert.equal(task?.operational, true)
+    assert.equal(task?.runtimeTabState, 'unknown')
+    assert.equal(task?.runtimeTab, undefined)
+    assert.deepEqual(task?.runtimeTabObservation, {
+      available: true,
+      source: 'browser',
+      readable: true,
+      observedAt: '2026-10-03T16:14:28.528Z',
+      reason: 'observation_identity_incomplete',
+    })
+    assert.deepEqual(requests.map(url => new URL(url).pathname).sort(), ['/health', '/watches'])
+
+    watch.diagnostics = { observation_available: false, reason: 'persistent_turn_identity_unavailable' }
+    const unavailable = (await bridge.sync()).tasks[0]
+    assert.equal(unavailable?.runtimeTabObservation?.available, false)
+    assert.equal(unavailable?.runtimeTabObservation?.readable, false)
+    assert.equal(unavailable?.runtimeTabObservation?.reason, 'persistent_turn_identity_unavailable')
+    watch.diagnostics = null
+    assert.equal((await bridge.sync()).tasks[0]?.runtimeTabObservation, undefined)
+  } finally {
+    await db.close()
+  }
+})
+
 test('active registry uses Sidecar diagnostics and provenance without requesting Relay', async () => {
   const db = await createDatabase('mem://')
   try {

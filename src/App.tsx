@@ -45,7 +45,7 @@ import { api } from './api'
 import { createRegistryRefreshGate } from './registry-refresh'
 import { projectRegistryGraph } from './registry-graph'
 import { createLifecycleCommandGate } from './lifecycle-command'
-import { observationUnavailableMessage, taskStatus } from './task-status'
+import { observationUnavailableMessage, runtimeTabPresentation, taskStatus } from './task-status'
 import type {
   CurrentEntity,
   CurrentFactDetail,
@@ -502,6 +502,15 @@ function SupervisedTaskCard({
   const [unbindError, setUnbindError] = useState('')
   const status = taskStatus(task, integrationAvailable, registryAvailable)
   const observationMessage = registryAvailable ? observationUnavailableMessage(task) : undefined
+  const [, refreshTabTime] = useState(0)
+  const tabPresentation = runtimeTabPresentation(task, registryAvailable)
+  const tabObservedAt = task.runtimeTabObservation?.observedAt
+  useEffect(() => {
+    const remaining = Date.parse(tabObservedAt ?? '') + 30_001 - Date.now()
+    if (!Number.isFinite(remaining) || remaining <= 0 || remaining > 35_001) return
+    const timer = window.setTimeout(() => refreshTabTime(value => value + 1), remaining)
+    return () => window.clearTimeout(timer)
+  }, [tabObservedAt])
 
   async function unbindWatchdog() {
     if (unbinding) return
@@ -569,23 +578,20 @@ function SupervisedTaskCard({
         </div>
 
         <div className={
-          task.runtimeTabState === 'present'
+          tabPresentation.status === 'present' || tabPresentation.status === 'readable'
             ? 'binding-row tab-binding'
-            : task.runtimeTabState === 'absent'
+            : tabPresentation.status === 'absent'
               ? 'binding-row tab-binding muted'
               : 'binding-row tab-binding unknown'
         }>
           <div className="binding-icon">T</div>
           <div className="binding-main">
             <span>运行时标签页 <small>RUNTIME TAB</small></span>
-            <strong>
-              {task.runtimeTabState === 'present'
-                ? task.runtimeTab?.title
-                : task.runtimeTabState === 'absent'
-                  ? '未绑定 / Not currently rendered'
-                  : '未知 / Sidecar observation unavailable'}
-            </strong>
-            <code>{task.runtimeTabState === 'present' ? task.runtimeTab?.id : '—'}</code>
+            <strong>{tabPresentation.label}</strong>
+            <code>{tabPresentation.detail}</code>
+            {tabObservedAt && Number.isFinite(Date.parse(tabObservedAt)) && (
+              <small>页面观测于 {dateTime(tabObservedAt)}</small>
+            )}
           </div>
         </div>
       </div>

@@ -62,9 +62,12 @@ export function runtimeTabPresentation(task: RuntimeTabTask, registryAvailable: 
 }
 
 export function observationUnavailableMessage(task: TaskState): string | undefined {
-  if (task.watchdogState === 'observation_unavailable'
-    && task.observationUnavailableReason === 'persistent_turn_identity_unavailable') {
+  if (task.watchdogState !== 'observation_unavailable') return undefined
+  if (task.observationUnavailableReason === 'persistent_turn_identity_unavailable') {
     return '当前页面未提供持久轮次标识，暂不能读取监督状态。'
+  }
+  if (task.observationUnavailableReason === 'human_turn_anchor_unavailable') {
+    return '浏览器连接仍可用，但旧人工轮次锚点已离开当前页面；请重新绑定此对话以确认当前轮次。'
   }
   return undefined
 }

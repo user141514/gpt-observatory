@@ -89,6 +89,12 @@ test('known persistent turn identity reason gets human text while preserving raw
   assert.equal(unavailable.lastError, 'RuntimeError: persistent_turn_identity_unavailable')
 })
 
+test('missing human turn anchor explains the re-anchor recovery without claiming transport failure', () => {
+  assert.equal(observationUnavailableMessage({
+    ...unavailable, observationUnavailableReason: 'human_turn_anchor_unavailable',
+  }), '浏览器连接仍可用，但旧人工轮次锚点已离开当前页面；请重新绑定此对话以确认当前轮次。')
+})
+
 test('unrelated state or reason does not fabricate the known observation explanation', () => {
   assert.equal(observationUnavailableMessage({
     ...unavailable, watchdogState: 'target_changed',

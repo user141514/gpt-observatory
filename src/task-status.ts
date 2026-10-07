@@ -1,4 +1,23 @@
-import type { SupervisedTask } from './types.js'
+import type { SupervisedTask, WatchdogRegisterResult } from './types.js'
+
+export function manualBindFeedback(result: Pick<WatchdogRegisterResult, 'mechanicalAttached' | 'normalBinding'>): {
+  tone: 'ok' | 'error'; message: string
+} {
+  if (result.mechanicalAttached !== true) {
+    return { tone: 'error', message: '注册已确认，但机械兜底尚无挂载确认；不要视为双路径就绪。' }
+  }
+  const binding = result.normalBinding
+  if (binding?.status === 'observed') {
+    return { tone: 'ok', message: '机械兜底已挂载；正常路径已重新挂载并已取得页面观测。' }
+  }
+  if (binding?.status === 'unavailable') {
+    return { tone: 'error', message: `机械兜底已挂载；正常路径观测失败：${binding.reason ?? '原因未提供'}。` }
+  }
+  if (binding?.status === 'pending') {
+    return { tone: 'ok', message: '机械兜底已挂载；正常路径正在重新挂载，以下任务卡会更新观测结果。' }
+  }
+  return { tone: 'error', message: '机械兜底已挂载；正常路径尚无重绑回执。' }
+}
 
 type TaskState = Pick<SupervisedTask, 'watchdogState' | 'operational'> & {
   observationUnavailableReason?: string
@@ -9,6 +28,7 @@ export function taskStatus(task: TaskState, integrationReady: boolean, registryA
     return { zh: '状态未知', en: 'UNVERIFIED', tone: 'unknown' }
   }
   const state = task.watchdogState
+  if (state === 'rebinding') return { zh: '正在重新挂载', en: 'REBINDING', tone: 'waiting' }
   if (state === 'observation_unavailable') {
     return { zh: '观测不可用', en: 'OBSERVATION UNAVAILABLE', tone: 'unknown' }
   }

@@ -54,9 +54,21 @@ export interface RegistryConfirmation {
   snapshot: SupervisedTasksProjection
 }
 
+export interface NormalBindingReceipt {
+  status: 'pending' | 'observed' | 'unavailable'
+  operationId: string
+  registrationId: string
+  requestedAt?: string
+  checkedAt?: string
+  observedAt?: string
+  reason?: string
+}
+
 export interface WatchdogRegisterResult extends RegistryConfirmation {
   conversationId: string
   created: boolean
+  mechanicalAttached?: boolean
+  normalBinding?: NormalBindingReceipt
 }
 
 export interface WatchdogUnregisterResult extends RegistryConfirmation {
@@ -97,6 +109,7 @@ export interface WatchdogWatch {
   consecutive_failures?: number
   last_error?: string | null
   diagnostics?: Record<string, unknown> | null
+  normal_binding?: unknown
   prompt?: WatchdogPromptState | null
   last_registration?: {
     source: string
@@ -142,6 +155,7 @@ export interface SupervisedTaskView {
   consecutiveFailures: number
   lastError?: string
   observationUnavailableReason?: string
+  normalBinding?: NormalBindingReceipt
   prompt?: TaskPromptState
 }
 
@@ -184,6 +198,22 @@ const WATCHDOG_ENTITY: EntityInput = {
   stableKey: 'service:watchdog',
   type: 'service',
   label: 'Watchdog',
+}
+
+function normalizeNormalBinding(value: unknown): NormalBindingReceipt | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const raw = value as Record<string, unknown>
+  if (!['pending', 'observed', 'unavailable'].includes(String(raw.status))
+      || typeof raw.operation_id !== 'string' || typeof raw.registration_id !== 'string') return undefined
+  return {
+    status: raw.status as NormalBindingReceipt['status'],
+    operationId: raw.operation_id,
+    registrationId: raw.registration_id,
+    requestedAt: epochSecondsIso(typeof raw.requested_at === 'number' ? raw.requested_at : undefined) ?? undefined,
+    checkedAt: epochSecondsIso(typeof raw.checked_at === 'number' ? raw.checked_at : undefined) ?? undefined,
+    observedAt: stringFact(raw.observed_at),
+    reason: stringFact(raw.reason),
+  }
 }
 
 export function createWatchdogBridge(
@@ -358,11 +388,16 @@ export function createWatchdogBridge(
           )
         }
 
+        const normalBinding = normalizeNormalBinding(watch.normal_binding)
         const operational =
           integrationReady
           && watch.connected
           && !watch.last_error
           && watch.last_success_at != null
+          && !['rebinding', 'observation_unavailable', 'target_changed'].includes(watch.state)
+          && watch.diagnostics?.observation_available !== false
+          && watch.diagnostics?.observation_readable !== false
+          && (!normalBinding || normalBinding.status === 'observed')
         const prompt = promptAvailable
           ? normalizePrompt(watch.prompt, taskId)
           : undefined
@@ -478,6 +513,7 @@ export function createWatchdogBridge(
           registered: true,
           connected: watch.connected,
           operational,
+          normalBinding,
           currentConversation: {
             id: watch.conversation_id,
             url: watch.target_url,
@@ -694,6 +730,7 @@ export function createWatchdogBridge(
     }
     const raw = await fetchJson<{
       conversation_id: string; created: boolean; operation_id?: string
+      mechanical_attached?: boolean; normal_binding?: unknown
     }>(fetchImpl, `${watchdogUrl}/register`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -708,7 +745,16 @@ export function createWatchdogBridge(
     })
     validateReceipt(raw, conversationId, operationId, 'created')
     const confirmation = await confirmRegistry(conversationId, true, operationId)
-    return { conversationId, created: raw.created, ...confirmation }
+    const checkedBinding = confirmation.snapshot.tasks.find(
+      task => task.currentConversation.id === conversationId,
+    )?.normalBinding
+    const normalBinding = checkedBinding?.operationId === operationId
+      ? checkedBinding : normalizeNormalBinding(raw.normal_binding)
+    return {
+      conversationId, created: raw.created, ...confirmation,
+      ...(typeof raw.mechanical_attached === 'boolean' ? { mechanicalAttached: raw.mechanical_attached } : {}),
+      ...(normalBinding ? { normalBinding } : {}),
+    }
   }
 
   async function unregister(

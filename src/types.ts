@@ -86,9 +86,21 @@ export interface RegistryConfirmation {
   snapshot: SupervisedTasksResponse
 }
 
+export interface NormalBindingReceipt {
+  status: 'pending' | 'observed' | 'unavailable'
+  operationId: string
+  registrationId: string
+  requestedAt?: string
+  checkedAt?: string
+  observedAt?: string
+  reason?: string
+}
+
 export interface WatchdogRegisterResult extends RegistryConfirmation {
   conversationId: string
   created: boolean
+  mechanicalAttached?: boolean
+  normalBinding?: NormalBindingReceipt
 }
 
 export interface WatchdogUnregisterResult extends RegistryConfirmation {
@@ -139,6 +151,7 @@ export interface SupervisedTask {
   consecutiveFailures: number
   lastError?: string
   observationUnavailableReason?: string
+  normalBinding?: NormalBindingReceipt
   prompt?: TaskPromptState
 }
 

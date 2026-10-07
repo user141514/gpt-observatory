@@ -45,7 +45,7 @@ import { api } from './api'
 import { createRegistryRefreshGate } from './registry-refresh'
 import { projectRegistryGraph } from './registry-graph'
 import { createLifecycleCommandGate } from './lifecycle-command'
-import { observationUnavailableMessage, runtimeTabPresentation, taskStatus } from './task-status'
+import { manualBindFeedback, observationUnavailableMessage, runtimeTabPresentation, taskStatus } from './task-status'
 import type {
   CurrentEntity,
   CurrentFactDetail,
@@ -317,7 +317,10 @@ function SupervisedTasks({
 
   async function bindWatchdog(event: FormEvent) {
     event.preventDefault()
-    const url = targetUrl.trim()
+    await attachWatchdog(targetUrl.trim())
+  }
+
+  async function attachWatchdog(url: string) {
     if (!url || binding) return
 
     setBinding(true)
@@ -331,12 +334,7 @@ function SupervisedTasks({
         }
         onRegistryConfirmed(result.snapshot)
         setTargetUrl('')
-        setBindingFeedback({
-          tone: 'ok',
-          message: result.created
-            ? `已确认绑定 ${result.conversationId} · ${dateTime(result.confirmedAt)}`
-            : `已确认该对话在 Watchdog 中：${result.conversationId} · ${dateTime(result.confirmedAt)}`,
-        })
+        setBindingFeedback(manualBindFeedback(result))
       })
     } catch (cause) {
       setBindingFeedback({
@@ -405,7 +403,7 @@ function SupervisedTasks({
           <span className="watchdog-bind-icon"><Link2 size={17} strokeWidth={1.8} /></span>
           <div>
             <strong>直接绑定 Watchdog</strong>
-            <small>DIRECT REGISTRATION · 不打开目标对话，不调用模型，只写入本机 Watchdog registry</small>
+            <small>先确认机械兜底，再清理并重建正常绑定；保留任务记录，不发送测试提示词。</small>
           </div>
         </div>
         <div className="watchdog-bind-controls">
@@ -440,7 +438,8 @@ function SupervisedTasks({
               promptWritable={data.integration.promptAvailable}
               onPromptSaved={onPromptSaved}
               onUnbind={unbindWatchdog}
-              lifecyclePending={lifecyclePending}
+              onRebind={task => attachWatchdog(task.currentConversation.url)}
+              lifecyclePending={lifecyclePending || binding}
               key={task.taskId}
             />
           ))}
@@ -488,6 +487,7 @@ function SupervisedTaskCard({
   promptWritable,
   onPromptSaved,
   onUnbind,
+  onRebind,
   lifecyclePending,
 }: {
   task: SupervisedTask
@@ -496,6 +496,7 @@ function SupervisedTaskCard({
   promptWritable: boolean
   onPromptSaved: () => Promise<void>
   onUnbind: (task: SupervisedTask) => Promise<void>
+  onRebind: (task: SupervisedTask) => Promise<void>
   lifecyclePending: boolean
 }) {
   const [unbinding, setUnbinding] = useState(false)
@@ -540,6 +541,16 @@ function SupervisedTaskCard({
           <span className="task-identity">
             {task.identitySource === 'watchdog_task_id' ? 'TASK ID' : 'LEGACY ID'}
           </span>
+          <button
+            type="button"
+            className="watchdog-unbind-button"
+            onClick={() => void onRebind(task)}
+            disabled={unbinding || lifecyclePending}
+            title="保留任务记录，重建正常绑定并确认机械兜底"
+          >
+            <RotateCcw size={13} strokeWidth={1.9} />
+            <span>重新挂载</span>
+          </button>
           <button
             type="button"
             className="watchdog-unbind-button"
@@ -595,6 +606,16 @@ function SupervisedTaskCard({
           </div>
         </div>
       </div>
+
+      {task.normalBinding && (
+        <div className={`prompt-feedback ${task.normalBinding.status === 'unavailable' ? 'degraded' : ''}`} role="status" data-testid="normal-binding-status">
+          <strong>正常路径重绑：{task.normalBinding.status === 'pending' ? '正在重新挂载'
+            : task.normalBinding.status === 'observed' ? '已重新挂载并取得页面观测' : '观测未通过'}</strong>
+          {task.normalBinding.reason && <code>{task.normalBinding.reason}</code>}
+          <small>本次操作 {task.normalBinding.operationId}</small>
+          {task.normalBinding.observedAt && <small>验证观测于 {dateTime(task.normalBinding.observedAt)}</small>}
+        </div>
+      )}
 
       <dl className="task-diagnostics">
         <div>

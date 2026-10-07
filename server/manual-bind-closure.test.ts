@@ -45,6 +45,50 @@ for (const state of ['rebinding', 'observation_unavailable']) {
   })
 }
 
+test('manual binding waits for the same normal rebind operation to reach observed before returning', async () => {
+  const db = await createDatabase('mem://')
+  let registerCalls = 0
+  let watchesCalls = 0
+  const observed = {
+    status: 'observed', operation_id: operation, registration_id: operation,
+    requested_at: 1791350000, checked_at: 1791350001,
+    observed_at: '2026-10-07T08:40:01.000Z', reason: null,
+  }
+  try {
+    const bridge = createWatchdogBridge(createStore(db), { fetchImpl: async input => {
+      const url = String(input)
+      if (url.endsWith('/register')) {
+        registerCalls += 1
+        return Response.json({ conversation_id: cid, created: false,
+          operation_id: operation, mechanical_attached: true, normal_binding: normal })
+      }
+      if (url.endsWith('/health')) return Response.json({ ready: true, polling_fresh: true, protocol_version: 2 })
+      if (url.endsWith('/watches')) {
+        watchesCalls += 1
+        const binding = watchesCalls === 1 ? normal : observed
+        return Response.json({ watches: [{ conversation_id: cid,
+          target_url: `https://chatgpt.com/c/${cid}`,
+          state: binding.status === 'pending' ? 'rebinding' : 'done',
+          connected: true, last_success_at: binding.status === 'pending' ? null : 1791350001,
+          last_error: null,
+          diagnostics: binding.status === 'pending'
+            ? { observation_available: false }
+            : { observation_available: true, observation_readable: true, observation_source: 'browser' },
+          normal_binding: binding }] })
+      }
+      throw new Error(`Unexpected request ${url}`)
+    } })
+    const result: any = await bridge.register(`https://chatgpt.com/c/${cid}`, operation)
+    assert.equal(result.confirmed, true)
+    assert.equal(result.mechanicalAttached, true)
+    assert.equal(result.normalBinding?.status, 'observed')
+    assert.equal(result.normalBinding?.operationId, operation)
+    assert.equal(result.snapshot.tasks[0]?.normalBinding?.status, 'observed')
+    assert.equal(registerCalls, 1)
+    assert.ok(watchesCalls >= 2)
+  } finally { await db.close() }
+})
+
 test('manual binding preserves mechanical receipt and separately reports normal rebind request', async () => {
   const db = await createDatabase('mem://')
   try {

@@ -744,12 +744,34 @@ export function createWatchdogBridge(
       }),
     })
     validateReceipt(raw, conversationId, operationId, 'created')
-    const confirmation = await confirmRegistry(conversationId, true, operationId)
-    const checkedBinding = confirmation.snapshot.tasks.find(
+    let confirmation = await confirmRegistry(conversationId, true, operationId)
+    const rawBinding = normalizeNormalBinding(raw.normal_binding)
+    let normalBinding = confirmation.snapshot.tasks.find(
       task => task.currentConversation.id === conversationId,
     )?.normalBinding
-    const normalBinding = checkedBinding?.operationId === operationId
-      ? checkedBinding : normalizeNormalBinding(raw.normal_binding)
+    if (normalBinding?.operationId !== operationId) normalBinding = rawBinding
+
+    // Manual bind is allowed to return pending, but give the explicitly-woken
+    // normal rebind a short opportunity to reach an observable terminal result.
+    // Match the exact operationId so an older binding result cannot close this call.
+    if (normalBinding?.operationId === operationId && normalBinding.status === 'pending') {
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        await new Promise(resolve => setTimeout(resolve, 50))
+        const snapshot = await sync()
+        const candidate = snapshot.tasks.find(
+          task => task.currentConversation.id === conversationId,
+        )?.normalBinding
+        if (candidate?.operationId !== operationId) continue
+        normalBinding = candidate
+        confirmation = {
+          ...confirmation,
+          confirmedAt: now().toISOString(),
+          snapshot,
+        }
+        if (candidate.status !== 'pending') break
+      }
+    }
+
     return {
       conversationId, created: raw.created, ...confirmation,
       ...(typeof raw.mechanical_attached === 'boolean' ? { mechanicalAttached: raw.mechanical_attached } : {}),

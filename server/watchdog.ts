@@ -247,32 +247,151 @@ export function createWatchdogBridge(
     }
   }
 
+  async function readRegistrySnapshot(): Promise<{
+    health: WatchdogHealth
+    watches: WatchdogWatch[]
+    integrationReady: boolean
+    promptAvailable: boolean
+  }> {
+    const [health, watchesPayload] = await Promise.all([
+      fetchJson<WatchdogHealth>(fetchImpl, `${watchdogUrl}/health`),
+      fetchJson<{ watches: WatchdogWatch[] }>(fetchImpl, `${watchdogUrl}/watches`),
+    ])
+    if (!watchesPayload || !Array.isArray(watchesPayload.watches)) {
+      throw new Error('Invalid Watchdog /watches snapshot: watches array is required.')
+    }
+    const watches = watchesPayload.watches
+    if (watches.some(watch => !watch
+      || typeof watch.conversation_id !== 'string'
+      || !watch.conversation_id
+      || typeof watch.target_url !== 'string'
+      || exactConversationId(watch.target_url) !== watch.conversation_id
+      || typeof watch.state !== 'string'
+      || typeof watch.connected !== 'boolean')) {
+      throw new Error('Invalid Watchdog /watches snapshot: malformed watch.')
+    }
+    return {
+      health,
+      watches,
+      integrationReady: Boolean(health.ready) && Boolean(health.polling_fresh),
+      promptAvailable:
+        typeof health.protocol_version === 'number'
+        && health.protocol_version >= 4,
+    }
+  }
+
+  function liveTaskView(
+    watch: WatchdogWatch,
+    integrationReady: boolean,
+    promptAvailable: boolean,
+  ): SupervisedTaskView {
+    const taskId = watch.task_id?.trim() || watch.conversation_id
+    const identitySource: SupervisedTaskView['identitySource'] =
+      watch.task_id?.trim() ? 'watchdog_task_id' : 'legacy_conversation_id'
+    const taskKey = `task:${taskId}`
+    const conversationKey = `conversation:${watch.conversation_id}`
+    const normalBinding = normalizeNormalBinding(watch.normal_binding)
+    const operational =
+      integrationReady
+      && watch.connected
+      && !watch.last_error
+      && watch.last_success_at != null
+      && !['rebinding', 'observation_unavailable', 'target_changed'].includes(watch.state)
+      && watch.diagnostics?.observation_available !== false
+      && watch.diagnostics?.observation_readable !== false
+      && (!normalBinding || normalBinding.status === 'observed')
+    const prompt = promptAvailable ? normalizePrompt(watch.prompt, taskId) : undefined
+    const lastRegistration = normalizeRegistration(watch.last_registration)
+    const runtimeTab = observedSidecarTab(watch)
+    return {
+      taskId,
+      stableKey: taskKey,
+      label: watch.task_label?.trim() || `监督任务 ${taskId.slice(0, 8)}`,
+      identitySource,
+      watchdogState: watch.state,
+      registered: true,
+      connected: watch.connected,
+      operational,
+      normalBinding,
+      currentConversation: {
+        id: watch.conversation_id,
+        url: watch.target_url,
+        stableKey: conversationKey,
+      },
+      runtimeTabState: runtimeTab ? 'present' : 'unknown',
+      runtimeTabObservation: typeof watch.diagnostics?.observation_available === 'boolean'
+        ? {
+          available: watch.diagnostics.observation_available,
+          readable: watch.diagnostics.observation_readable === true,
+          source: stringFact(watch.diagnostics.observation_source),
+          observedAt: stringFact(watch.diagnostics.observation_observed_at),
+          reason: stringFact(watch.diagnostics.reason),
+        }
+        : undefined,
+      runtimeTab,
+      registeredAt: epochSecondsIso(watch.registered_at) ?? undefined,
+      lastRegistration,
+      bindingChangedAt: epochSecondsIso(watch.binding_changed_at) ?? undefined,
+      lastPollAt: epochSecondsIso(watch.last_poll_at) ?? undefined,
+      lastSuccessAt: epochSecondsIso(watch.last_success_at) ?? undefined,
+      consecutiveFailures: numberOrZero(watch.consecutive_failures),
+      lastError: watch.last_error ?? undefined,
+      observationUnavailableReason: watch.state === 'observation_unavailable'
+        ? stringFact(watch.diagnostics?.reason)
+        : undefined,
+      prompt,
+    }
+  }
+
+  async function liveProjection(): Promise<SupervisedTasksProjection> {
+    const observedAt = now().toISOString()
+    try {
+      const { health, watches, integrationReady, promptAvailable } =
+        await readRegistrySnapshot()
+      return {
+        integration: {
+          available: true,
+          ready: integrationReady,
+          promptAvailable,
+          watchdogUrl,
+          relayUrl,
+          lastSyncAt: observedAt,
+          health,
+        },
+        tasks: watches
+          .map(watch => liveTaskView(watch, integrationReady, promptAvailable))
+          .sort((a, b) => a.label.localeCompare(b.label)),
+      }
+    } catch (error) {
+      return {
+        integration: {
+          available: false,
+          ready: false,
+          promptAvailable: false,
+          watchdogUrl,
+          relayUrl,
+          lastSyncAt: observedAt,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        tasks: [],
+      }
+    }
+  }
+
+  function scheduleDurableSync(): void {
+    const prior = inFlight
+    void (async () => {
+      if (prior) await prior
+      await sync()
+    })()
+  }
+
   async function performSync(): Promise<SupervisedTasksProjection> {
     const observedAt = now().toISOString()
 
     try {
-      const [health, watchesPayload] = await Promise.all([
-        fetchJson<WatchdogHealth>(fetchImpl, `${watchdogUrl}/health`),
-        fetchJson<{ watches: WatchdogWatch[] }>(fetchImpl, `${watchdogUrl}/watches`),
-      ])
-
-      if (!watchesPayload || !Array.isArray(watchesPayload.watches)) {
-        throw new Error('Invalid Watchdog /watches snapshot: watches array is required.')
-      }
-      const watches = watchesPayload.watches
-      if (watches.some(watch => !watch
-        || typeof watch.conversation_id !== 'string'
-        || !watch.conversation_id
-        || typeof watch.target_url !== 'string'
-        || exactConversationId(watch.target_url) !== watch.conversation_id
-        || typeof watch.state !== 'string'
-        || typeof watch.connected !== 'boolean')) {
-        throw new Error('Invalid Watchdog /watches snapshot: malformed watch.')
-      }
-      const integrationReady = Boolean(health.ready) && Boolean(health.polling_fresh)
-      const promptAvailable =
-        typeof health.protocol_version === 'number'
-        && health.protocol_version >= 4
+      const { health, watches, integrationReady, promptAvailable } =
+        await readRegistrySnapshot()
 
       await store.observe({
         source: WATCHDOG_SOURCE,
@@ -673,9 +792,9 @@ export function createWatchdogBridge(
     registered: boolean,
     operationId: string,
   ): Promise<RegistryConfirmation> {
-    // A poll started before the mutation cannot confirm its result.
-    if (inFlight) await sync()
-    const snapshot = await sync()
+    // Control-plane confirmation must not wait for durable Observatory
+    // projection. Always read a fresh post-mutation Watchdog snapshot.
+    const snapshot = await liveProjection()
     const observedRegistered = snapshot.tasks.some(
       task => task.currentConversation.id === conversationId,
     )
@@ -695,6 +814,7 @@ export function createWatchdogBridge(
         `${watchdogUrl}/watches`,
       )
     }
+    projection = snapshot
     return { confirmed: true, confirmedAt: now().toISOString(), operationId, snapshot }
   }
 
@@ -757,7 +877,7 @@ export function createWatchdogBridge(
     if (normalBinding?.operationId === operationId && normalBinding.status === 'pending') {
       for (let attempt = 0; attempt < 20; attempt += 1) {
         await new Promise(resolve => setTimeout(resolve, 50))
-        const snapshot = await sync()
+        const snapshot = await liveProjection()
         const candidate = snapshot.tasks.find(
           task => task.currentConversation.id === conversationId,
         )?.normalBinding
@@ -772,6 +892,7 @@ export function createWatchdogBridge(
       }
     }
 
+    scheduleDurableSync()
     return {
       conversationId, created: raw.created, ...confirmation,
       ...(typeof raw.mechanical_attached === 'boolean' ? { mechanicalAttached: raw.mechanical_attached } : {}),
@@ -798,6 +919,7 @@ export function createWatchdogBridge(
     })
     validateReceipt(raw, conversationId, operationId, 'removed')
     const confirmation = await confirmRegistry(conversationId, false, operationId)
+    scheduleDurableSync()
     return { conversationId, removed: raw.removed, ...confirmation }
   }
 

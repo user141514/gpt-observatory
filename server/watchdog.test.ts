@@ -836,8 +836,87 @@ test('active registry uses Sidecar diagnostics and provenance without requesting
   }
 })
 
+test('register confirmation does not wait for slow durable projection after Watchdog already accepted the bind', async () => {
+  const db = await createDatabase('mem://')
+  let releaseProjection!: () => void
+  const projectionGate = new Promise<void>(resolve => { releaseProjection = resolve })
+  try {
+    const baseStore = createStore(db)
+    let blockProjection = true
+    const store = {
+      ...baseStore,
+      async observe(input: Parameters<typeof baseStore.observe>[0]) {
+        if (blockProjection) await projectionGate
+        return baseStore.observe(input)
+      },
+    }
+    const watch: WatchdogWatch = {
+      conversation_id: CHAT_A,
+      target_url: `https://chatgpt.com/c/${CHAT_A}`,
+      state: 'done',
+      connected: true,
+      last_success_at: 1_790_000_001,
+      diagnostics: {
+        observation_available: true,
+        observation_readable: true,
+        observation_source: 'browser',
+      },
+      normal_binding: {
+        status: 'observed',
+        operation_id: 'fast-confirm',
+        registration_id: 'registration-fast-confirm',
+        requested_at: 1_790_000_000,
+        checked_at: 1_790_000_001,
+        observed_at: '2026-10-07T12:00:01.000Z',
+        reason: null,
+      },
+    }
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/health')) {
+        return jsonResponse({ ready: true, polling_fresh: true, protocol_version: 2 })
+      }
+      if (url.endsWith('/watches')) return jsonResponse({ watches: [watch] })
+      if (url.endsWith('/register') && init?.method === 'POST') {
+        return jsonResponse({
+          conversation_id: CHAT_A,
+          created: true,
+          operation_id: 'fast-confirm',
+          mechanical_attached: true,
+          normal_binding: watch.normal_binding,
+        })
+      }
+      return jsonResponse([])
+    }
+    const bridge = createWatchdogBridge(store as ReturnType<typeof createStore>, { fetchImpl })
+    const pendingProjection = bridge.sync()
+    const result = await Promise.race([
+      bridge.register(watch.target_url, 'fast-confirm'),
+      new Promise<never>((_, reject) => setTimeout(
+        () => reject(new Error('register waited for durable projection')),
+        250,
+      )),
+    ])
+    assert.equal(result.confirmed, true)
+    assert.equal(result.mechanicalAttached, true)
+    assert.equal(result.normalBinding?.status, 'observed')
+
+    blockProjection = false
+    releaseProjection()
+    await pendingProjection
+    await bridge.sync()
+    assert.equal(
+      bridge.current().tasks.some(task => task.currentConversation.id === CHAT_A),
+      true,
+    )
+  } finally {
+    releaseProjection?.()
+    await db.close()
+  }
+})
+
 for (const action of ['register', 'unregister'] as const) {
-  test(`${action} confirmation waits for a new snapshot after any pre-mutation inFlight sync`, async () => {
+  test(`${action} confirmation reads a fresh registry snapshot after any pre-mutation inFlight sync`, async () => {
     const db = await createDatabase('mem://')
     let releaseSnapshot!: (response: Response) => void
     let snapshotStarted!: () => void
@@ -883,7 +962,8 @@ for (const action of ['register', 'unregister'] as const) {
       await oldSync
       const result = await mutation
       assert.equal(result.confirmed, true)
-      assert.equal(watchesReads, 2, 'confirmation must read the registry after the mutation')
+      assert.ok(watchesReads >= 2, 'confirmation must read the registry after the mutation')
+      await bridge.sync()
       assert.equal(bridge.current().tasks.some(task => task.currentConversation.id === CHAT_A), action === 'register')
     } finally {
       await db.close()

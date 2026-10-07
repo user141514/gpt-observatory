@@ -1,0 +1,346 @@
+{
+  "schemaVersion": 1,
+  "language": "zh",
+  "mapId": "manual-bind-control-plane",
+  "revision": 1,
+  "project": {
+    "id": "gpt-observatory",
+    "name": "GPT Observatory",
+    "revision": "b2f37494dc8ca26028d7e147efd1d94f166bf8ec"
+  },
+  "constraintDiscovery": {
+    "checkedAt": "2026-10-07T12:26:00Z",
+    "checkedPaths": [
+      "server/watchdog.ts",
+      "server/watchdog.test.ts",
+      "src/App.tsx",
+      "server/store.ts",
+      "scripts/install-desktop.mjs"
+    ],
+    "uninspectedPaths": [
+      "server/semantic.ts",
+      "src/registry-graph.ts"
+    ]
+  },
+  "constraints": [
+    {
+      "id": "fresh-registry-confirmation",
+      "name": "手动绑定必须由变更后的 fresh Watchdog snapshot 确认",
+      "note": "不得复用 mutation 前的 in-flight Observatory projection；/register 回执后必须重新读取 /health + /watches。",
+      "origin": "user",
+      "strength": "required",
+      "applicability": "applicable",
+      "scope": "task",
+      "taskId": "manual-bind-control-plane",
+      "modules": [],
+      "relationships": [],
+      "evidence": [],
+      "verification": "测试 mutation 前存在慢 in-flight sync 时，register 仍读取 mutation 后的 fresh /watches。"
+    },
+    {
+      "id": "durable-projection-not-gate",
+      "name": "RocksDB/semantic projection 不得阻塞手动绑定 HTTP 回执",
+      "note": "正式 4317 已出现 Watchdog 约 0.15 秒完成而 HTTP 15 秒超时；控制面确认后只异步调度 durable projection。",
+      "origin": "user",
+      "strength": "required",
+      "applicability": "applicable",
+      "scope": "task",
+      "taskId": "manual-bind-control-plane",
+      "modules": [],
+      "relationships": [],
+      "evidence": [],
+      "verification": "人为阻塞 store.observe 时 register 必须在 250ms 测试窗口内返回 confirmed；释放后 durable projection 追上。"
+    },
+    {
+      "id": "dual-route-semantics",
+      "name": "机械挂载与正常重绑状态必须分别保真",
+      "note": "mechanicalAttached 必须来自 Watchdog mutation receipt；normalBinding 必须匹配同一 operationId，允许 observed/unavailable/pending，不得伪造全绿。",
+      "origin": "user",
+      "strength": "required",
+      "applicability": "applicable",
+      "scope": "task",
+      "taskId": "manual-bind-control-plane",
+      "modules": [],
+      "relationships": [],
+      "evidence": [],
+      "verification": "manual-bind closure tests 和正式测试 conversation 实机验收。"
+    }
+  ],
+  "groups": [
+    {
+      "id": "observatory-control",
+      "name": "Observatory 控制面",
+      "role": "interaction",
+      "members": [
+        "ui-bind",
+        "watchdog-bridge"
+      ],
+      "evidence": [
+        {
+          "path": "src/App.tsx",
+          "line": 323,
+          "endLine": 347,
+          "note": "手动绑定 UI 与控制面回执消费入口。"
+        }
+      ]
+    },
+    {
+      "id": "observatory-data",
+      "name": "Observatory 数据面",
+      "role": "runtime",
+      "members": [
+        "durable-store"
+      ],
+      "evidence": [
+        {
+          "path": "server/store.ts",
+          "line": 90,
+          "endLine": 160,
+          "note": "Observatory durable observation/fact projection 的存储实现。"
+        }
+      ]
+    },
+    {
+      "id": "external-runtime",
+      "name": "外部监督运行态",
+      "role": "external-services",
+      "members": [
+        "watchdog-runtime",
+        "sidecar-runtime",
+        "mechanical-scheduler"
+      ],
+      "evidence": [
+        {
+          "path": "server/watchdog.ts",
+          "line": 219,
+          "endLine": 960,
+          "note": "Observatory 对 Watchdog/Sidecar-derived supervision 与 mechanical receipt 的外部运行态边界。"
+        }
+      ]
+    }
+  ],
+  "modules": [
+    {
+      "id": "ui-bind",
+      "name": "手动绑定 UI",
+      "kind": "local",
+      "responsibility": "提交 bind/rebind，显示 mechanical 与 normal 的独立回执。",
+      "role": "frontend",
+      "ownership": [
+        {
+          "kind": "file",
+          "path": "src/App.tsx"
+        },
+        {
+          "kind": "file",
+          "path": "src/task-status.ts"
+        }
+      ],
+      "evidence": [
+        {
+          "path": "src/App.tsx",
+          "line": 323,
+          "endLine": 347,
+          "note": "attachWatchdog 消费 register 回执并显示 manualBindFeedback。"
+        }
+      ],
+      "status": "supported",
+      "openQuestions": [],
+      "layout": {
+        "row": 0,
+        "column": 0
+      }
+    },
+    {
+      "id": "watchdog-bridge",
+      "name": "Watchdog Bridge",
+      "kind": "local",
+      "responsibility": "代理 /register、fresh registry confirmation、normalBinding 短等待，并异步触发 durable projection。",
+      "role": "backend",
+      "ownership": [
+        {
+          "kind": "file",
+          "path": "server/watchdog.ts"
+        },
+        {
+          "kind": "file",
+          "path": "server/watchdog.test.ts"
+        }
+      ],
+      "evidence": [
+        {
+          "path": "server/watchdog.ts",
+          "line": 219,
+          "endLine": 960,
+          "note": "createWatchdogBridge 拥有 control-plane mutation/confirmation 与 durable sync。"
+        }
+      ],
+      "status": "supported",
+      "openQuestions": [],
+      "layout": {
+        "row": 1,
+        "column": 0
+      }
+    },
+    {
+      "id": "durable-store",
+      "name": "Observatory RocksDB Projection",
+      "kind": "local",
+      "responsibility": "持久化 Watchdog observations/facts/relations；不能作为 bind HTTP 成功门。",
+      "role": "database",
+      "ownership": [
+        {
+          "kind": "file",
+          "path": "server/store.ts"
+        }
+      ],
+      "evidence": [
+        {
+          "path": "server/store.ts",
+          "line": 90,
+          "endLine": 698,
+          "note": "createStore.observe 写 observation 与 current facts。"
+        }
+      ],
+      "status": "supported",
+      "openQuestions": [],
+      "layout": {
+        "row": 2,
+        "column": 0
+      }
+    },
+    {
+      "id": "watchdog-runtime",
+      "name": "Watchdog 9235",
+      "kind": "external",
+      "responsibility": "durable registry、mechanical attach barrier、normal rebind 状态机。",
+      "role": "backend",
+      "ownership": [],
+      "evidence": [],
+      "status": "uncertain",
+      "openQuestions": [
+        "运行态版本由正式 /health 回读验证。"
+      ],
+      "layout": {
+        "row": 1,
+        "column": 2
+      }
+    },
+    {
+      "id": "sidecar-runtime",
+      "name": "Sidecar 7337",
+      "kind": "external",
+      "responsibility": "normal binding owner 与 browser observation。",
+      "role": "backend",
+      "ownership": [],
+      "evidence": [],
+      "status": "uncertain",
+      "openQuestions": [
+        "运行态 writer epoch/build 由 extension-status 回读。"
+      ],
+      "layout": {
+        "row": 2,
+        "column": 2
+      }
+    },
+    {
+      "id": "mechanical-scheduler",
+      "name": "Windows Task Scheduler",
+      "kind": "external",
+      "responsibility": "独立 mechanical fixed-action 路径。",
+      "role": "queue",
+      "ownership": [],
+      "evidence": [],
+      "status": "uncertain",
+      "openQuestions": [
+        "Task action/interval 由正式实机读回。"
+      ],
+      "layout": {
+        "row": 0,
+        "column": 2
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "id": "ui-register",
+      "from": "ui-bind",
+      "to": "watchdog-bridge",
+      "label": "POST manual bind",
+      "evidence": [
+        {
+          "path": "src/App.tsx",
+          "line": 323,
+          "endLine": 347,
+          "note": "UI 调用 api.registerWatchdog。"
+        }
+      ],
+      "kind": "request",
+      "visibility": "overview",
+      "status": "supported",
+      "openQuestions": []
+    },
+    {
+      "id": "bridge-watchdog",
+      "from": "watchdog-bridge",
+      "to": "watchdog-runtime",
+      "label": "mutation + fresh /health+/watches confirmation",
+      "evidence": [
+        {
+          "path": "server/watchdog.ts",
+          "line": 720,
+          "endLine": 930,
+          "note": "register/unregister 与 fresh registry confirmation。"
+        }
+      ],
+      "kind": "request",
+      "visibility": "overview",
+      "status": "supported",
+      "openQuestions": []
+    },
+    {
+      "id": "bridge-store",
+      "from": "watchdog-bridge",
+      "to": "durable-store",
+      "label": "async durable projection after control-plane confirmation",
+      "evidence": [
+        {
+          "path": "server/watchdog.ts",
+          "line": 219,
+          "endLine": 740,
+          "note": "sync/performSync 持久化投影；mutation 后只后台追赶。"
+        }
+      ],
+      "kind": "control",
+      "visibility": "overview",
+      "status": "supported",
+      "openQuestions": []
+    },
+    {
+      "id": "watchdog-sidecar",
+      "from": "watchdog-runtime",
+      "to": "sidecar-runtime",
+      "label": "same-generation normal rebind + observation-only probe",
+      "evidence": [],
+      "kind": "request",
+      "visibility": "overview",
+      "status": "uncertain",
+      "openQuestions": [
+        "跨仓库运行态关系，以专用测试 conversation 实机验收。"
+      ]
+    },
+    {
+      "id": "watchdog-mechanical",
+      "from": "watchdog-runtime",
+      "to": "mechanical-scheduler",
+      "label": "synchronous ensure_attached before register success",
+      "evidence": [],
+      "kind": "control",
+      "visibility": "overview",
+      "status": "uncertain",
+      "openQuestions": [
+        "跨仓库运行态关系，以 Scheduled Task 文件时间与 action 回读。"
+      ]
+    }
+  ]
+}
